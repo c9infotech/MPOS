@@ -6,6 +6,7 @@ import '../login/login_screen.dart';
 import '../pos/pos_screen.dart';
 import '../printer/printer_settings_screen.dart';
 import '../sales/sales_list_screen.dart';
+import '../draft/draft_list_screen.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -18,13 +19,20 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _index = 0;
+  int _draftTabEpoch = 0;
 
-  static const _pages = [
-    PosScreen(),
-    SalesListScreen(),
-  ];
+  List<Widget> get _pages => [
+        const PosScreen(),
+        DraftListScreen(
+          key: ValueKey('draft-$_draftTabEpoch'),
+          onRestoreToPos: _goToPos,
+        ),
+        const SalesListScreen(),
+      ];
 
-  static const _titles = ['POS', 'Sales List'];
+  static const _titles = ['POS', 'Draft', 'Sales List'];
+
+  void _goToPos() => setState(() => _index = 0);
 
   Future<void> _logout() async {
     await AppScope.of(context).auth.clearSession();
@@ -74,12 +82,20 @@ class _MainShellState extends State<MainShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (value) => setState(() => _index = value),
+        onDestinationSelected: (value) => setState(() {
+          _index = value;
+          if (value == 1) _draftTabEpoch++;
+        }),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.point_of_sale_outlined),
             selectedIcon: Icon(Icons.point_of_sale),
             label: 'POS',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.drafts_outlined),
+            selectedIcon: Icon(Icons.drafts),
+            label: 'Draft',
           ),
           NavigationDestination(
             icon: Icon(Icons.receipt_long_outlined),

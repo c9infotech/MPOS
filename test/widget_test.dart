@@ -7,6 +7,8 @@ import 'package:mpos/core/api/pos_repository.dart';
 import 'package:mpos/core/auth/auth_service.dart';
 import 'package:mpos/core/config/app_config.dart';
 import 'package:mpos/core/config/config_loader.dart';
+import 'package:mpos/core/draft/pos_draft_service.dart';
+import 'package:mpos/core/storage/pos_draft_store.dart';
 import 'package:mpos/features/login/login_screen.dart';
 
 void main() {
@@ -27,6 +29,7 @@ void main() {
     final app = MposApp(
       auth: auth,
       repository: PosRepository(ApiClient(), auth),
+      posDrafts: PosDraftService(PosDraftStore(prefs)),
     );
 
     await tester.pumpWidget(app);

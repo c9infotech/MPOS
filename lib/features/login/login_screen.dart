@@ -22,7 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String _username = '';
   String _password = '';
-  static const _companies = ['z_KARIBU_CAMPS_TEST'];
+  static const _companies = ['KARIBU_CAMPS'];
   String _company = _companies.first;
   bool _obscure = true;
   bool _loading = false;

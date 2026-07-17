@@ -7,6 +7,7 @@ import '../../core/printing/receipt_factory.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/customer.dart';
 import '../../models/product.dart';
+import '../../core/draft/pos_draft_service.dart';
 
 class PosScreen extends StatefulWidget {
   const PosScreen({super.key});
@@ -27,6 +28,7 @@ class _PosScreenState extends State<PosScreen> {
   bool _saving = false;
   bool _didLoad = false;
   String _selectedCategory = 'All';
+  PosDraftService? _posDrafts;
 
   @override
   void initState() {
@@ -37,15 +39,39 @@ class _PosScreenState extends State<PosScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final drafts = AppScope.of(context).posDrafts;
+    if (_posDrafts != drafts) {
+      _posDrafts?.removeListener(_onDraftServiceChanged);
+      _posDrafts = drafts;
+      _posDrafts!.addListener(_onDraftServiceChanged);
+    }
     if (_didLoad) return;
     _didLoad = true;
     _load();
+    _applyPendingRestore();
   }
 
   @override
   void dispose() {
+    _posDrafts?.removeListener(_onDraftServiceChanged);
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onDraftServiceChanged() => _applyPendingRestore();
+
+  void _applyPendingRestore() {
+    final pending = _posDrafts?.takePendingRestore();
+    if (pending == null || !mounted) return;
+    setState(() {
+      _cart
+        ..clear()
+        ..addAll(pending.lines);
+      _currency = pending.currency;
+      if (pending.customer != null) {
+        _selectedCustomer = pending.customer!.copy();
+      }
+    });
   }
 
   Future<void> _load() async {
@@ -347,6 +373,156 @@ class _PosScreenState extends State<PosScreen> {
     roomCtrl.dispose();
   }
 
+  Future<({int table, String subdivision})?> _pickTableSubdivision() async {
+    var table = 1;
+    var subdivision = 'A';
+
+    return showModalBottomSheet<({int table, String subdivision})>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'Save draft — select table & subdivision',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Table',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: List.generate(PosDraftService.tableCount, (i) {
+                        final n = i + 1;
+                        final selected = table == n;
+                        return ChoiceChip(
+                          label: Text('$n'),
+                          selected: selected,
+                          onSelected: (_) =>
+                              setModalState(() => table = n),
+                          selectedColor: AppColors.emerald,
+                          labelStyle: TextStyle(
+                            color: selected
+                                ? AppColors.textOnPrimary
+                                : AppColors.textPrimary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        );
+                      }),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Subdivision',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 44,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: PosDraftService.subdivisions.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 8),
+                        itemBuilder: (_, i) {
+                          final letter = PosDraftService.subdivisions[i];
+                          final selected = subdivision == letter;
+                          return ChoiceChip(
+                            label: Text(letter),
+                            selected: selected,
+                            onSelected: (_) =>
+                                setModalState(() => subdivision = letter),
+                            selectedColor: AppColors.primary,
+                            labelStyle: TextStyle(
+                              color: selected
+                                  ? AppColors.textOnPrimary
+                                  : AppColors.textPrimary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(
+                        ctx,
+                        (table: table, subdivision: subdivision),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.emerald,
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                      child: Text('Save to Table $table · $subdivision'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _saveDraft() async {
+    if (_cart.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cart is empty — add items first')),
+      );
+      return;
+    }
+
+    final selection = await _pickTableSubdivision();
+    if (selection == null || !mounted) return;
+
+    setState(() => _saving = true);
+    try {
+      await AppScope.of(context).posDrafts.saveDraft(
+            tableNumber: selection.table,
+            subdivision: selection.subdivision,
+            lines: List<CartLine>.from(_cart),
+            currency: _currency,
+            customer: _selectedCustomer,
+          );
+      if (!mounted) return;
+      setState(() => _cart.clear());
+      AppScope.of(context).posDrafts.clearLinkedDraft();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Draft saved for Table ${selection.table} · ${selection.subdivision}',
+          ),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _checkout() async {
     if (_selectedCustomer == null || _selectedCustomer!.cardCode.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -409,6 +585,7 @@ class _PosScreenState extends State<PosScreen> {
         currency: _currency,
         lines: _cart,
       );
+      await AppScope.of(context).posDrafts.removeLinkedDraftAfterCheckout();
       if (!mounted) return;
       setState(() => _cart.clear());
       await showPrintAfterSuccessDialog(
@@ -427,6 +604,7 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   void _clearCart() {
+    AppScope.of(context).posDrafts.clearLinkedDraft();
     setState(() {
       _cart.clear();
       _selectedCustomer = null;
@@ -963,12 +1141,37 @@ class _PosScreenState extends State<PosScreen> {
                                       'Clear Cart',
                                       style: TextStyle(
                                         fontWeight: FontWeight.w700,
+                                        fontSize: 13,
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 12),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: SizedBox(
+                                  height: 48,
+                                  child: FilledButton(
+                                    onPressed: _saving ? null : _saveDraft,
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: AppColors.primary,
+                                      foregroundColor: AppColors.textOnPrimary,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(24),
+                                      ),
+                                    ),
+                                    child: const Text(
+                                      'Save Draft',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
                               Expanded(
                                 child: SizedBox(
                                   height: 48,
@@ -997,6 +1200,7 @@ class _PosScreenState extends State<PosScreen> {
                                             'Checkout',
                                             style: TextStyle(
                                               fontWeight: FontWeight.w700,
+                                              fontSize: 13,
                                             ),
                                           ),
                                   ),
