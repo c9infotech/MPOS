@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="corporate_primary">#2E4B87</color>
+    <color name="corporate_primary_dark">#1E3359</color>
+    <color name="corporate_primary_light">#4A6FA5</color>
+    <color name="corporate_background">#F8FAFC</color>
+    <color name="corporate_surface">#FFFFFF</color>
+	<color name="ic_launcher_background">#FFFFFF</color>
+</resources>
