@@ -10,20 +10,34 @@ import 'receipt_data.dart';
 
 Future<bool> printReceipt(
   BuildContext context,
-  ReceiptData receipt,
-) async {
+  ReceiptData receipt, {
+  bool includeCustomerSign = true,
+  bool showToast = true,
+}) async {
   final type = await PrinterPrefs.getType();
   if (!context.mounted) return false;
   if (type == PrinterType.builtin) {
-    return _printBuiltIn(context, receipt);
+    return _printBuiltIn(
+      context,
+      receipt,
+      includeCustomerSign: includeCustomerSign,
+      showToast: showToast,
+    );
   }
-  return _printBluetooth(context, receipt);
+  return _printBluetooth(
+    context,
+    receipt,
+    includeCustomerSign: includeCustomerSign,
+    showToast: showToast,
+  );
 }
 
 Future<bool> _printBuiltIn(
   BuildContext context,
-  ReceiptData receipt,
-) async {
+  ReceiptData receipt, {
+  required bool includeCustomerSign,
+  bool showToast = true,
+}) async {
   if (!BuiltInPrinterService.isSupported) {
     _toast(
       context,
@@ -49,11 +63,21 @@ Future<bool> _printBuiltIn(
   _showPrintingDialog(context);
 
   try {
-    final bytes = await ReceiptBuilder.build(receipt);
+    final bytes = await ReceiptBuilder.build(
+      receipt,
+      includeCustomerSign: includeCustomerSign,
+    );
     await BuiltInPrinterService.printBytes(bytes);
     if (context.mounted) {
       Navigator.of(context, rootNavigator: true).pop();
-      _toast(context, 'Receipt printed.');
+      if (showToast) {
+        _toast(
+          context,
+          includeCustomerSign
+              ? 'Receipt printed (with Customer Sign).'
+              : 'Copy printed (without Customer Sign).',
+        );
+      }
     }
     return true;
   } catch (e) {
@@ -67,8 +91,10 @@ Future<bool> _printBuiltIn(
 
 Future<bool> _printBluetooth(
   BuildContext context,
-  ReceiptData receipt,
-) async {
+  ReceiptData receipt, {
+  required bool includeCustomerSign,
+  bool showToast = true,
+}) async {
   if (!BluetoothPrinterService.isSupported) {
     _toast(
       context,
@@ -111,11 +137,21 @@ Future<bool> _printBluetooth(
         'Could not connect to printer. Open Printer settings and select it.',
       );
     }
-    final bytes = await ReceiptBuilder.build(receipt);
+    final bytes = await ReceiptBuilder.build(
+      receipt,
+      includeCustomerSign: includeCustomerSign,
+    );
     await BluetoothPrinterService.printBytes(bytes);
     if (context.mounted) {
       Navigator.of(context, rootNavigator: true).pop();
-      _toast(context, 'Receipt printed.');
+      if (showToast) {
+        _toast(
+          context,
+          includeCustomerSign
+              ? 'Receipt printed (with Customer Sign).'
+              : 'Copy printed (without Customer Sign).',
+        );
+      }
     }
     return true;
   } catch (e) {
@@ -127,35 +163,83 @@ Future<bool> _printBluetooth(
   }
 }
 
+/// First print with Customer Sign, then same dialog button becomes Print(CC).
 Future<void> showPrintAfterSuccessDialog(
   BuildContext context, {
   required String message,
   required ReceiptData receipt,
 }) async {
   if (!context.mounted) return;
-  final action = await showDialog<String>(
+
+  await showDialog<void>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-      title: const Text('Success'),
-      content: Text(message),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, 'done'),
-          child: const Text('Done'),
-        ),
-        FilledButton.icon(
-          onPressed: () => Navigator.pop(ctx, 'print'),
-          style: FilledButton.styleFrom(backgroundColor: AppColors.emerald),
-          icon: const Icon(Icons.print),
-          label: const Text('Print receipt'),
-        ),
-      ],
-    ),
+    barrierDismissible: false,
+    builder: (dialogContext) {
+      var printedWithSign = false;
+      var printing = false;
+
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          Future<void> handlePrint() async {
+            if (printing) return;
+            setDialogState(() => printing = true);
+            final withSign = !printedWithSign;
+            final ok = await printReceipt(
+              dialogContext,
+              receipt,
+              includeCustomerSign: withSign,
+              showToast: false,
+            );
+            if (!dialogContext.mounted) return;
+            if (ok && !withSign) {
+              // Print(CC) finished — close dialog.
+              Navigator.pop(dialogContext);
+              return;
+            }
+            setDialogState(() {
+              printing = false;
+              if (ok && withSign) printedWithSign = true;
+            });
+          }
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
+            title: const Text('Success'),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: printing
+                    ? null
+                    : () => Navigator.pop(dialogContext),
+                child: const Text('Done'),
+              ),
+              FilledButton.icon(
+                onPressed: printing ? null : handlePrint,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.emerald,
+                ),
+                icon: printing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.print),
+                label: Text(
+                  printedWithSign ? 'Print(CC)' : 'Print receipt',
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    },
   );
-  if (action == 'print' && context.mounted) {
-    await printReceipt(context, receipt);
-  }
 }
 
 Future<String?> _pickBluetoothPrinter(BuildContext context) async {

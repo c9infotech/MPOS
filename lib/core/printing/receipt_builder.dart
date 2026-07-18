@@ -8,6 +8,7 @@ class ReceiptBuilder {
   static Future<List<int>> build(
     ReceiptData receipt, {
     PaperSize paper = PaperSize.mm58,
+    bool includeCustomerSign = true,
   }) async {
     final profile = await CapabilityProfile.load();
     final generator = Generator(paper, profile);
@@ -17,20 +18,58 @@ class ReceiptBuilder {
     final dateFmt = DateFormat('dd MMM yyyy HH:mm');
 
     bytes.addAll(generator.reset());
+    // Company header (replaces MPOS / Sales Receipt).
     bytes.addAll(
       generator.text(
-        'MPOS',
+        'Karibu Camps and Lodges Ltd',
         styles: const PosStyles(
           align: PosAlign.center,
           bold: true,
           height: PosTextSize.size2,
-          width: PosTextSize.size2,
+          width: PosTextSize.size1,
         ),
       ),
     );
     bytes.addAll(
       generator.text(
-        _safe(receipt.title),
+        'P.O.Box 174,',
+        styles: const PosStyles(align: PosAlign.center),
+      ),
+    );
+    bytes.addAll(
+      generator.text(
+        'Arusha, Tanzania',
+        styles: const PosStyles(align: PosAlign.center),
+      ),
+    );
+    bytes.addAll(
+      generator.text(
+        'TIN No. 135-228-494',
+        styles: const PosStyles(align: PosAlign.center),
+      ),
+    );
+    bytes.addAll(
+      generator.text(
+        'VRN No: 40-027743-X',
+        styles: const PosStyles(align: PosAlign.center),
+      ),
+    );
+    if (receipt.camp.isNotEmpty) {
+      bytes.addAll(
+        generator.text(
+          _safe(receipt.camp),
+          styles: const PosStyles(
+            align: PosAlign.center,
+            bold: true,
+            height: PosTextSize.size2,
+            width: PosTextSize.size1,
+          ),
+        ),
+      );
+    }
+    bytes.addAll(
+      generator.text(
+        'Sales Invoice',
         styles: const PosStyles(align: PosAlign.center, bold: true),
       ),
     );
@@ -45,9 +84,6 @@ class ReceiptBuilder {
     }
     if (receipt.room.isNotEmpty) {
       bytes.addAll(generator.text(_safe('Room: ${receipt.room}')));
-    }
-    if (receipt.tin.isNotEmpty) {
-      bytes.addAll(generator.text(_safe('TIN: ${receipt.tin}')));
     }
     bytes.addAll(generator.hr());
 
@@ -128,16 +164,20 @@ class ReceiptBuilder {
     }
 
     bytes.addAll(generator.hr());
-    bytes.addAll(
-      generator.text(
-        _safe(receipt.footer),
-        styles: const PosStyles(align: PosAlign.left, bold: true),
-      ),
-    );
-    // Blank space for customer handwritten signature.
-    bytes.addAll(generator.feed(5));
-    bytes.addAll(generator.text('______________________________'));
-    bytes.addAll(generator.feed(2));
+    if (includeCustomerSign) {
+      bytes.addAll(
+        generator.text(
+          _safe(receipt.footer),
+          styles: const PosStyles(align: PosAlign.left, bold: true),
+        ),
+      );
+      // Blank space for customer handwritten signature.
+      bytes.addAll(generator.feed(5));
+      bytes.addAll(generator.text('______________________________'));
+      bytes.addAll(generator.feed(2));
+    } else {
+      bytes.addAll(generator.feed(2));
+    }
     bytes.addAll(generator.cut());
     return bytes;
   }

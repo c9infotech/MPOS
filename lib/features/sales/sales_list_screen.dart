@@ -314,7 +314,8 @@ class _PaymentSheetState extends State<_PaymentSheet> {
     super.initState();
     _mode =
         widget.paymentModes.isNotEmpty ? widget.paymentModes.first : null;
-    _amountController.text = '';
+    // Prefill with document total so Submit is enabled immediately.
+    _amountController.text = _roundMoney(_totalPrice).toStringAsFixed(2);
   }
 
   @override
@@ -322,6 +323,9 @@ class _PaymentSheetState extends State<_PaymentSheet> {
     _amountController.dispose();
     super.dispose();
   }
+
+  double _roundMoney(double value) =>
+      double.parse(value.toStringAsFixed(2));
 
   double get _totalItems =>
       widget.notes.fold(0, (sum, n) => sum + n.items.length).toDouble();
@@ -332,30 +336,42 @@ class _PaymentSheetState extends State<_PaymentSheet> {
       );
 
   double get _totalTax =>
-      widget.notes.fold(0, (sum, n) => sum + n.taxTotal);
+      _roundMoney(widget.notes.fold(0.0, (sum, n) => sum + n.taxTotal));
 
   double get _totalPrice =>
-      widget.notes.fold(0, (sum, n) => sum + n.grandTotal);
+      _roundMoney(widget.notes.fold(0.0, (sum, n) => sum + n.grandTotal));
 
   double get _payAmount =>
-      double.tryParse(_amountController.text.trim()) ?? 0;
+      _roundMoney(double.tryParse(_amountController.text.trim()) ?? 0);
 
-  double get _balance => _totalPrice - _payAmount;
+  double get _balance => _roundMoney(_totalPrice - _payAmount);
 
   String get _currency =>
       widget.notes.isNotEmpty ? widget.notes.first.docCurrency : '';
 
+  void _showMessage(String message, {Color background = AppColors.error}) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.hideCurrentSnackBar();
+    messenger?.showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: background),
+    );
+  }
+
   Future<void> _submit() async {
     if (_mode == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Select any payment mode.'),
-          backgroundColor: AppColors.error,
-        ),
+      _showMessage('Select any payment mode.');
+      return;
+    }
+    if (_payAmount <= 0) {
+      _showMessage('Enter a valid payment amount.');
+      return;
+    }
+    if (_balance > 0) {
+      _showMessage(
+        'Payment is less than total. Balance: ${_balance.toStringAsFixed(2)}',
       );
       return;
     }
-    if (_balance > 0) return;
 
     setState(() => _saving = true);
     final receipt = ReceiptFactory.fromDeliveryNotes(
@@ -373,9 +389,10 @@ class _PaymentSheetState extends State<_PaymentSheet> {
       Navigator.pop(context, receipt);
     } on ApiException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
-      );
+      _showMessage(e.message);
+    } catch (e) {
+      if (!mounted) return;
+      _showMessage(e.toString());
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -384,163 +401,171 @@ class _PaymentSheetState extends State<_PaymentSheet> {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottom),
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.85,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Sales Details',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: ListView(
-                children: [
-                  for (final note in widget.notes) ...[
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              note.cardName,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                            Text('Room: ${note.rooming}'),
-                            Text('Doc No: ${note.docNum}'),
-                            const Divider(),
-                            for (var i = 0; i < note.items.length; i++)
-                              Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 4),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      flex: 3,
-                                      child: Text(
-                                        '${i + 1}. ${note.items[i].itemCode}\n${note.items[i].description}',
-                                        style: const TextStyle(fontSize: 12),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Text(
-                                        note.items[i].quantity
-                                            .toStringAsFixed(2),
-                                        textAlign: TextAlign.right,
-                                        style: const TextStyle(fontSize: 12),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Text(
-                                        note.items[i].price.toStringAsFixed(2),
-                                        textAlign: TextAlign.right,
-                                        style: const TextStyle(fontSize: 12),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Padding(
+        padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottom),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.85,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Sales Details',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final note in widget.notes) ...[
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                note.cardName,
+                                style:
+                                    const TextStyle(fontWeight: FontWeight.w700),
                               ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  Wrap(
-                    spacing: 16,
-                    runSpacing: 8,
-                    children: [
-                      Text('Total Items: ${_totalItems.toInt()}'),
-                      Text('Total Qty: ${_totalQty.toStringAsFixed(2)}'),
-                      Text('Total Tax: ${_totalTax.toStringAsFixed(2)}'),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _summaryBox(
-                          'Total ($_currency)',
-                          _totalPrice.toStringAsFixed(2),
-                        ),
-                      ),
-                      Expanded(
-                        child: _summaryBox(
-                          'Payment',
-                          _payAmount.toStringAsFixed(2),
-                        ),
-                      ),
-                      Expanded(
-                        child: _summaryBox(
-                          'Balance',
-                          _balance.toStringAsFixed(2),
-                          color: _balance <= 0
-                              ? AppColors.success
-                              : AppColors.error,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<PaymentMode>(
-                    // ignore: deprecated_member_use
-                    value: _mode,
-                    decoration:
-                        const InputDecoration(labelText: 'Payment Mode'),
-                    items: widget.paymentModes
-                        .map(
-                          (m) => DropdownMenuItem(
-                            value: m,
-                            child: Text(m.paymentMode),
+                              Text('Room: ${note.rooming}'),
+                              Text('Doc No: ${note.docNum}'),
+                              const Divider(),
+                              for (var i = 0; i < note.items.length; i++)
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 4),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        flex: 3,
+                                        child: Text(
+                                          '${i + 1}. ${note.items[i].itemCode}\n${note.items[i].description}',
+                                          style: const TextStyle(fontSize: 12),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: Text(
+                                          note.items[i].quantity
+                                              .toStringAsFixed(2),
+                                          textAlign: TextAlign.right,
+                                          style: const TextStyle(fontSize: 12),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: Text(
+                                          note.items[i].price.toStringAsFixed(2),
+                                          textAlign: TextAlign.right,
+                                          style: const TextStyle(fontSize: 12),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
                           ),
-                        )
-                        .toList(),
-                    onChanged: (v) => setState(() => _mode = v),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Wrap(
+                      spacing: 16,
+                      runSpacing: 8,
+                      children: [
+                        Text('Total Items: ${_totalItems.toInt()}'),
+                        Text('Total Qty: ${_totalQty.toStringAsFixed(2)}'),
+                        Text('Total Tax: ${_totalTax.toStringAsFixed(2)}'),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _summaryBox(
+                            'Total ($_currency)',
+                            _totalPrice.toStringAsFixed(2),
+                          ),
+                        ),
+                        Expanded(
+                          child: _summaryBox(
+                            'Payment',
+                            _payAmount.toStringAsFixed(2),
+                          ),
+                        ),
+                        Expanded(
+                          child: _summaryBox(
+                            'Balance',
+                            _balance.toStringAsFixed(2),
+                            color: _balance <= 0
+                                ? AppColors.success
+                                : AppColors.error,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<PaymentMode>(
+                      // ignore: deprecated_member_use
+                      value: _mode,
+                      decoration:
+                          const InputDecoration(labelText: 'Payment Mode'),
+                      items: widget.paymentModes
+                          .map(
+                            (m) => DropdownMenuItem(
+                              value: m,
+                              child: Text(m.paymentMode),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) => setState(() => _mode = v),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _amountController,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: 'Amount'),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Close'),
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _amountController,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'Amount'),
-                    onChanged: (_) => setState(() {}),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _saving ? null : _submit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.emerald,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: AppColors.primaryLight,
+                      ),
+                      child: _saving
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('Submit'),
+                    ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Close'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: (_balance > 0 || _saving) ? null : _submit,
-                    child: _saving
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text('Submit'),
-                  ),
-                ),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

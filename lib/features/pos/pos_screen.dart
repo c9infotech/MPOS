@@ -508,7 +508,11 @@ class _PosScreenState extends State<PosScreen> {
             customer: _selectedCustomer,
           );
       if (!mounted) return;
-      setState(() => _cart.clear());
+      setState(() {
+        _cart.clear();
+        _selectedCustomer = null;
+        _currency = 'USD';
+      });
       AppScope.of(context).posDrafts.clearLinkedDraft();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
