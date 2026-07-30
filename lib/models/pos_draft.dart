@@ -113,6 +113,7 @@ Map<String, dynamic> _cartLineToJson(CartLine line) => {
         'qtyPerUom': line.product.qtyPerUom,
         'itemUom': line.product.itemUom,
         'isPriceEditable': line.product.isPriceEditable,
+        'premiumDrinks': line.product.isPremiumDrink ? 'Y' : 'N',
         'image': line.product.image,
       },
       'qty': line.qty,
@@ -124,12 +125,16 @@ Map<String, dynamic> _cartLineToJson(CartLine line) => {
 
 CartLine _cartLineFromJson(Map<String, dynamic> json) {
   final productJson = json['product'] as Map<String, dynamic>;
+  final product = Product.fromJson(productJson);
+  final chargeable = product.isPremiumDrink
+      ? true
+      : (json['chargeable'] as bool? ?? false);
   return CartLine(
-    product: Product.fromJson(productJson),
+    product: product,
     qty: (json['qty'] as num).toInt(),
     cartPrice: (json['cartPrice'] as num).toDouble(),
     cartUom: json['cartUom'] as String,
-    chargeable: json['chargeable'] as bool? ?? true,
+    chargeable: chargeable,
     withGst: (json['withGst'] as num?)?.toDouble() ?? 0,
   );
 }
@@ -150,6 +155,7 @@ List<CartLine> cloneCartLines(List<CartLine> lines) {
             qtyPerUom: l.product.qtyPerUom,
             itemUom: l.product.itemUom,
             isPriceEditable: l.product.isPriceEditable,
+            isPremiumDrink: l.product.isPremiumDrink,
             image: l.product.image,
           ),
           qty: l.qty,

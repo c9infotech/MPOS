@@ -11,6 +11,7 @@ class Product {
     required this.qtyPerUom,
     required this.itemUom,
     required this.isPriceEditable,
+    required this.isPremiumDrink,
     this.image,
   });
 
@@ -25,6 +26,8 @@ class Product {
   final String qtyPerUom;
   final String itemUom;
   final bool isPriceEditable;
+  /// From API `premiumDrinks`: Y = chargeable locked on.
+  final bool isPremiumDrink;
   final String? image;
 
   factory Product.fromJson(Map<String, dynamic> json) {
@@ -40,6 +43,7 @@ class Product {
       qtyPerUom: (json['qtyPerUom'] ?? '').toString(),
       itemUom: (json['itemUOM'] ?? json['itemUom'] ?? '').toString(),
       isPriceEditable: (json['isPriceEditable'] ?? 'N').toString() == 'Y',
+      isPremiumDrink: (json['premiumDrinks'] ?? 'N').toString() == 'Y',
       image: json['image']?.toString(),
     );
   }

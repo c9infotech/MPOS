@@ -82,8 +82,18 @@ class ReceiptBuilder {
     if (receipt.customerName.isNotEmpty) {
       bytes.addAll(generator.text(_clip(receipt.customerName, 32)));
     }
-    if (receipt.room.isNotEmpty) {
-      bytes.addAll(generator.text(_safe('Room: ${receipt.room}')));
+    if (receipt.tin.trim().isNotEmpty) {
+      bytes.addAll(generator.text(_safe('TIN No: ${receipt.tin.trim()}')));
+    }
+    if (receipt.bookingReference.trim().isNotEmpty) {
+      bytes.addAll(
+        generator.text(
+          _safe('Booking Ref: ${receipt.bookingReference.trim()}'),
+        ),
+      );
+    }
+    if (receipt.room.trim().isNotEmpty) {
+      bytes.addAll(generator.text(_safe('Room No: ${receipt.room.trim()}')));
     }
     bytes.addAll(generator.hr());
 

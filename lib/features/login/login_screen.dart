@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
+import '../../core/app_version.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/app_logo.dart';
@@ -22,10 +23,19 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String _username = '';
   String _password = '';
-  static const _companies = ['KARIBU_CAMPS'];
+  static const _companies = ['z_KARIBU_CAMPS_TEST'];
   String _company = _companies.first;
   bool _obscure = true;
   bool _loading = false;
+  String? _versionLabel;
+
+  @override
+  void initState() {
+    super.initState();
+    loadMposVersionLabel().then((label) {
+      if (mounted) setState(() => _versionLabel = label);
+    });
+  }
 
   @override
   void dispose() {
@@ -220,6 +230,17 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ),
+                    if (_versionLabel != null) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        _versionLabel!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

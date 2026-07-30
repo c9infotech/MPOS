@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app.dart';
 import '../../core/api/api_client.dart';
@@ -29,6 +30,7 @@ class _PosScreenState extends State<PosScreen> {
   bool _didLoad = false;
   String _selectedCategory = 'All';
   PosDraftService? _posDrafts;
+  final Map<String, TextEditingController> _priceControllers = {};
 
   @override
   void initState() {
@@ -55,6 +57,9 @@ class _PosScreenState extends State<PosScreen> {
   void dispose() {
     _posDrafts?.removeListener(_onDraftServiceChanged);
     _searchController.dispose();
+    for (final c in _priceControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -64,6 +69,7 @@ class _PosScreenState extends State<PosScreen> {
     final pending = _posDrafts?.takePendingRestore();
     if (pending == null || !mounted) return;
     setState(() {
+      _clearPriceControllers();
       _cart
         ..clear()
         ..addAll(pending.lines);
@@ -71,6 +77,55 @@ class _PosScreenState extends State<PosScreen> {
       if (pending.customer != null) {
         _selectedCustomer = pending.customer!.copy();
       }
+      for (final line in _cart) {
+        _syncPriceController(line);
+      }
+    });
+  }
+
+  TextEditingController _priceControllerFor(CartLine line) {
+    final key = line.product.itemCode;
+    final existing = _priceControllers[key];
+    if (existing != null) return existing;
+    final controller = TextEditingController(
+      text: line.withGst > 0
+          ? line.withGst.toStringAsFixed(2)
+          : line.cartPrice.toStringAsFixed(2),
+    );
+    _priceControllers[key] = controller;
+    return controller;
+  }
+
+  void _syncPriceController(CartLine line) {
+    final controller = _priceControllerFor(line);
+    final value = line.product.isPriceEditable && line.withGst > 0
+        ? line.withGst
+        : line.cartPrice;
+    final text = value.toStringAsFixed(2);
+    if (controller.text != text) {
+      controller.text = text;
+    }
+  }
+
+  void _removePriceController(String itemCode) {
+    _priceControllers.remove(itemCode)?.dispose();
+  }
+
+  void _clearPriceControllers() {
+    for (final c in _priceControllers.values) {
+      c.dispose();
+    }
+    _priceControllers.clear();
+  }
+
+  void _updateEditablePrice(CartLine line, String raw) {
+    final parsed = double.tryParse(raw.trim());
+    if (parsed == null || parsed < 0) return;
+    setState(() {
+      // Same as Vue: typed value is with-tax; cartPrice is net of 18%.
+      line.withGst = parsed;
+      line.cartPrice =
+          double.parse((parsed / 1.18).toStringAsFixed(2));
     });
   }
 
@@ -169,10 +224,11 @@ class _PosScreenState extends State<PosScreen> {
             qty: 1,
             cartPrice: uomPrice > 0 ? uomPrice : price,
             cartUom: product.salUnitMsr,
-            chargeable: false,
+            chargeable: product.isPremiumDrink,
             withGst: uomPrice > 0 ? uomPrice : price,
           ),
         );
+        _syncPriceController(_cart.last);
       }
     });
   }
@@ -189,6 +245,8 @@ class _PosScreenState extends State<PosScreen> {
             ? line.product.usduomPrice
             : line.product.tzsuomPrice;
       }
+      line.withGst = line.cartPrice;
+      _syncPriceController(line);
     });
   }
 
@@ -202,6 +260,8 @@ class _PosScreenState extends State<PosScreen> {
         line.cartPrice =
             _currency == 'USD' ? line.product.usdPrice : line.product.tzsPrice;
       }
+      line.withGst = line.cartPrice;
+      _syncPriceController(line);
     }
   }
 
@@ -512,6 +572,7 @@ class _PosScreenState extends State<PosScreen> {
         _cart.clear();
         _selectedCustomer = null;
         _currency = 'USD';
+        _clearPriceControllers();
       });
       AppScope.of(context).posDrafts.clearLinkedDraft();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -615,6 +676,7 @@ class _PosScreenState extends State<PosScreen> {
       _currency = 'USD';
       _searchController.clear();
       _selectedCategory = 'All';
+      _clearPriceControllers();
     });
   }
 
@@ -1028,12 +1090,65 @@ class _PosScreenState extends State<PosScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 2),
-                                  Text(
-                                    'UoM: ${line.cartUom} – $_currency ${line.cartPrice.toStringAsFixed(2)}',
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: AppColors.textSecondary,
-                                    ),
+                                  Row(
+                                    children: [
+                                      Text(
+                                        'UoM: ${line.cartUom} – Price: $_currency ',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.textSecondary,
+                                        ),
+                                      ),
+                                      if (line.product.isPriceEditable)
+                                        SizedBox(
+                                          width: 72,
+                                          height: 30,
+                                          child: TextField(
+                                            controller:
+                                                _priceControllerFor(line),
+                                            keyboardType:
+                                                const TextInputType
+                                                    .numberWithOptions(
+                                              decimal: true,
+                                            ),
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                            decoration: InputDecoration(
+                                              isDense: true,
+                                              contentPadding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 8,
+                                                vertical: 6,
+                                              ),
+                                              filled: true,
+                                              fillColor: AppColors.surfaceMuted,
+                                              border: OutlineInputBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                                borderSide: BorderSide.none,
+                                              ),
+                                            ),
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter.allow(
+                                                RegExp(r'[0-9.]'),
+                                              ),
+                                            ],
+                                            onChanged: (v) =>
+                                                _updateEditablePrice(line, v),
+                                          ),
+                                        )
+                                      else
+                                        Text(
+                                          line.cartPrice.toStringAsFixed(2),
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: AppColors.textSecondary,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                   const SizedBox(height: 6),
                                   Row(
@@ -1054,12 +1169,18 @@ class _PosScreenState extends State<PosScreen> {
                                         height: 24,
                                         width: 24,
                                         child: Checkbox(
-                                          value: line.chargeable,
+                                          value: line.product.isPremiumDrink
+                                              ? true
+                                              : line.chargeable,
                                           activeColor: AppColors.emerald,
-                                          onChanged: (v) {
-                                            setState(() =>
-                                                line.chargeable = v ?? false);
-                                          },
+                                          onChanged:
+                                              line.product.isPremiumDrink
+                                                  ? null
+                                                  : (v) {
+                                                      setState(() =>
+                                                          line.chargeable =
+                                                              v ?? false);
+                                                    },
                                         ),
                                       ),
                                       const Text(
@@ -1077,6 +1198,9 @@ class _PosScreenState extends State<PosScreen> {
                                             if (line.qty > 1) {
                                               line.qty--;
                                             } else {
+                                              _removePriceController(
+                                                line.product.itemCode,
+                                              );
                                               _cart.removeAt(index);
                                             }
                                           });
@@ -1100,8 +1224,12 @@ class _PosScreenState extends State<PosScreen> {
                                             setState(() => line.qty++),
                                       ),
                                       IconButton(
-                                        onPressed: () => setState(
-                                            () => _cart.removeAt(index)),
+                                        onPressed: () => setState(() {
+                                          _removePriceController(
+                                            line.product.itemCode,
+                                          );
+                                          _cart.removeAt(index);
+                                        }),
                                         icon: const Icon(
                                           Icons.delete_outline,
                                           color: AppColors.textSecondary,

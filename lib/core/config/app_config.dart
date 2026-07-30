@@ -9,7 +9,7 @@ class AppConfig {
 
   factory AppConfig.fromJson(Map<String, dynamic> json) {
     // Match Vue config key `companydb` (also accept `companyDb`).
-    final companyDb = (json['companydb'] ?? json['companyDb'] ?? 'KARIBU_CAMPS')
+    final companyDb = (json['companydb'] ?? json['companyDb'] ?? 'z_KARIBU_CAMPS_TEST')
         .toString();
     return AppConfig(
       apiUrl: (json['apiUrl'] as String?) ?? 'http://default-url/api/',

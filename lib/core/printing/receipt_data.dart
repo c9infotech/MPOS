@@ -28,6 +28,7 @@ class ReceiptData {
     this.customerName = '',
     this.room = '',
     this.tin = '',
+    this.bookingReference = '',
     this.camp = '',
     this.paymentMode = '',
     this.paidAmount,
@@ -45,6 +46,7 @@ class ReceiptData {
   final String customerName;
   final String room;
   final String tin;
+  final String bookingReference;
   /// Camp name from CS (cash sales) document / customer card name.
   final String camp;
   final String paymentMode;
