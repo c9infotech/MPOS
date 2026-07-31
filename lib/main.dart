@@ -8,7 +8,6 @@ import 'core/api/pos_repository.dart';
 import 'core/auth/auth_service.dart';
 import 'core/config/config_loader.dart';
 import 'core/draft/pos_draft_service.dart';
-import 'core/storage/pos_draft_store.dart';
 import 'core/theme/app_colors.dart';
 
 Future<void> main() async {
@@ -28,7 +27,7 @@ Future<void> main() async {
     final prefs = await SharedPreferences.getInstance();
     final auth = AuthService(prefs);
     final repository = PosRepository(ApiClient(), auth);
-    final posDrafts = PosDraftService(PosDraftStore(prefs));
+    final posDrafts = PosDraftService(repository);
     runApp(MposApp(
       auth: auth,
       repository: repository,

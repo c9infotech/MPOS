@@ -75,14 +75,22 @@ class SavedPosDraft {
     if (customerJson is Map<String, dynamic>) {
       customer = Customer.fromJson(customerJson);
     }
+    final slotJson = json['slot'];
+    final slot = slotJson is Map<String, dynamic>
+        ? PosDraftSlot.fromJson(slotJson)
+        : PosDraftSlot(
+            tableNumber: (json['tableNumber'] as num?)?.toInt() ?? 0,
+            subdivision: (json['subdivision'] ?? '').toString(),
+          );
     return SavedPosDraft(
-      id: json['id'] as String,
-      slot: PosDraftSlot.fromJson(json['slot'] as Map<String, dynamic>),
+      id: (json['id'] ?? json['draftId'] ?? '').toString(),
+      slot: slot,
       lines: (json['lines'] as List)
           .map((e) => _cartLineFromJson(e as Map<String, dynamic>))
           .toList(),
       currency: json['currency'] as String? ?? 'USD',
-      savedAt: DateTime.parse(json['savedAt'] as String),
+      savedAt: DateTime.tryParse((json['savedAt'] ?? '').toString()) ??
+          DateTime.now(),
       customer: customer,
     );
   }
@@ -120,6 +128,7 @@ Map<String, dynamic> _cartLineToJson(CartLine line) => {
       'cartPrice': line.cartPrice,
       'cartUom': line.cartUom,
       'chargeable': line.chargeable,
+      'isDelivered': line.isDelivered,
       'withGst': line.withGst,
     };
 
@@ -128,15 +137,24 @@ CartLine _cartLineFromJson(Map<String, dynamic> json) {
   final product = Product.fromJson(productJson);
   final chargeable = product.isPremiumDrink
       ? true
-      : (json['chargeable'] as bool? ?? false);
+      : _toBool(json['chargeable']);
   return CartLine(
     product: product,
     qty: (json['qty'] as num).toInt(),
     cartPrice: (json['cartPrice'] as num).toDouble(),
     cartUom: json['cartUom'] as String,
     chargeable: chargeable,
+    isDelivered: _toBool(
+      json['isDelivered'] ?? json['IsDelivered'] ?? json['delivered'],
+    ),
     withGst: (json['withGst'] as num?)?.toDouble() ?? 0,
   );
+}
+
+bool _toBool(dynamic value) {
+  if (value is bool) return value;
+  final raw = value?.toString().trim().toLowerCase();
+  return raw == 'true' || raw == '1' || raw == 'y';
 }
 
 List<CartLine> cloneCartLines(List<CartLine> lines) {
@@ -162,6 +180,7 @@ List<CartLine> cloneCartLines(List<CartLine> lines) {
           cartPrice: l.cartPrice,
           cartUom: l.cartUom,
           chargeable: l.chargeable,
+          isDelivered: l.isDelivered,
           withGst: l.withGst,
         ),
       )

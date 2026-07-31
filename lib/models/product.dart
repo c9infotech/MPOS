@@ -62,6 +62,7 @@ class CartLine {
     required this.cartPrice,
     required this.cartUom,
     required this.chargeable,
+    this.isDelivered = false,
     this.withGst = 0,
   });
 
@@ -70,5 +71,6 @@ class CartLine {
   double cartPrice;
   String cartUom;
   bool chargeable;
+  bool isDelivered;
   double withGst;
 }

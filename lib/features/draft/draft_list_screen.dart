@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
 import '../../core/draft/pos_draft_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/pos_draft.dart';
+import '../../models/product.dart';
 
 class DraftListScreen extends StatefulWidget {
   const DraftListScreen({super.key, required this.onRestoreToPos});
@@ -17,9 +20,11 @@ class DraftListScreen extends StatefulWidget {
 class _DraftListScreenState extends State<DraftListScreen> {
   List<SavedPosDraft> _drafts = [];
   bool _loading = true;
+  String? _error;
   String? _busyId;
   bool _didLoad = false;
   PosDraftService? _draftService;
+  Timer? _autoRefreshTimer;
 
   @override
   void didChangeDependencies() {
@@ -33,29 +38,43 @@ class _DraftListScreenState extends State<DraftListScreen> {
     if (_didLoad) return;
     _didLoad = true;
     _load();
+    _startAutoRefresh();
+  }
+
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (!mounted || _busyId != null) return;
+      _load(silent: true);
+    });
   }
 
   @override
   void dispose() {
+    _autoRefreshTimer?.cancel();
     _draftService?.removeListener(_onDraftsChanged);
     super.dispose();
   }
 
-  void _onDraftsChanged() => _load();
+  void _onDraftsChanged() => _load(silent: true);
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) {
+      setState(() => _loading = true);
+    }
     try {
       final drafts = await AppScope.of(context).posDrafts.getAllDrafts();
       if (!mounted) return;
       setState(() {
         _drafts = drafts..sort((a, b) => b.savedAt.compareTo(a.savedAt));
+        _error = null;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _drafts = [];
+        _error = e.toString();
         _loading = false;
       });
     }
@@ -82,6 +101,7 @@ class _DraftListScreenState extends State<DraftListScreen> {
       ),
     );
     if (ok != true) return;
+    if (!mounted) return;
 
     setState(() => _busyId = draft.id);
     await AppScope.of(context).posDrafts.removeDraft(draft.id);
@@ -90,10 +110,67 @@ class _DraftListScreenState extends State<DraftListScreen> {
   }
 
   Future<void> _restoreDraft(SavedPosDraft draft) async {
+    final deliveredCount = draft.lines.where((line) => line.isDelivered).length;
+    if (deliveredCount == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No delivered items in this draft yet.'),
+          backgroundColor: AppColors.warning,
+        ),
+      );
+      return;
+    }
     setState(() => _busyId = draft.id);
     AppScope.of(context).posDrafts.requestRestore(draft);
     widget.onRestoreToPos();
     if (mounted) setState(() => _busyId = null);
+  }
+
+  Future<void> _markDelivered(SavedPosDraft draft) async {
+    final pendingIndexes = <int>{};
+    for (var i = 0; i < draft.lines.length; i++) {
+      if (!draft.lines[i].isDelivered) {
+        pendingIndexes.add(i);
+      }
+    }
+    if (pendingIndexes.isEmpty) return;
+
+    setState(() => _busyId = draft.id);
+    try {
+      await AppScope.of(context).posDrafts.markLinesDelivered(
+        draft: draft,
+        lineIndexes: pendingIndexes,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Marked as delivered'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      await _load();
+    } on Exception catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
+      );
+    } finally {
+      if (mounted) setState(() => _busyId = null);
+    }
+  }
+
+  List<MapEntry<int, CartLine>> _sortedLineEntries(SavedPosDraft draft) {
+    final entries = List.generate(
+      draft.lines.length,
+      (index) => MapEntry(index, draft.lines[index]),
+    );
+    entries.sort((a, b) {
+      if (a.value.isDelivered == b.value.isDelivered) {
+        return a.key.compareTo(b.key);
+      }
+      return a.value.isDelivered ? -1 : 1;
+    });
+    return entries;
   }
 
   @override
@@ -120,10 +197,12 @@ class _DraftListScreenState extends State<DraftListScreen> {
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
               ),
               const SizedBox(height: 6),
-              const Text(
-                'On POS, add items to cart → Save Draft → pick table & subdivision.',
+              Text(
+                _error == null
+                    ? 'On POS, add items to cart → Save Draft → pick table & subdivision.'
+                    : _error!,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.textSecondary),
+                style: const TextStyle(color: AppColors.textSecondary),
               ),
             ],
           ),
@@ -159,30 +238,89 @@ class _DraftListScreenState extends State<DraftListScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${draft.itemCount} items · '
+                    '${draft.itemCount} qty · '
                     '${draft.currency} ${draft.subtotal.toStringAsFixed(2)}',
                     style: const TextStyle(color: AppColors.textSecondary),
                   ),
                   const SizedBox(height: 6),
-                  ...draft.lines.take(3).map(
-                        (l) => Text(
-                          '· ${l.qty}x ${l.product.itemName.isNotEmpty ? l.product.itemName : l.product.itemCode}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13),
+                  ..._sortedLineEntries(draft).map((entry) {
+                    final line = entry.value;
+                    final isDelivered = line.isDelivered;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDelivered
+                            ? const Color(0xFFDDF4EA)
+                            : AppColors.surfaceMuted,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isDelivered
+                              ? AppColors.success
+                              : AppColors.warning.withValues(alpha: 0.55),
+                          width: 1,
                         ),
                       ),
-                  if (draft.lines.length > 3)
-                    Text(
-                      '… +${draft.lines.length - 3} more',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.textSecondary,
+                      child: Row(
+                        children: [
+                          if (isDelivered)
+                            const Icon(
+                              Icons.check_circle,
+                              size: 18,
+                              color: AppColors.success,
+                            )
+                          else
+                            const Icon(
+                              Icons.pending_outlined,
+                              size: 18,
+                              color: AppColors.warning,
+                            ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '${line.qty}x ${line.product.itemName.isNotEmpty ? line.product.itemName : line.product.itemCode}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: isDelivered
+                                    ? AppColors.emerald
+                                    : AppColors.textPrimary,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            isDelivered ? 'Delivered' : 'Pending',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: isDelivered
+                                  ? AppColors.success
+                                  : AppColors.warning,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
+                    );
+                  }),
                   const SizedBox(height: 12),
                   Row(
                     children: [
+                      if (draft.lines.any((line) => !line.isDelivered)) ...[
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: busy ? null : () => _markDelivered(draft),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.success,
+                              side: const BorderSide(color: AppColors.success),
+                            ),
+                            child: const Text('Delivered'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                      ],
                       Expanded(
                         child: OutlinedButton(
                           onPressed: busy ? null : () => _cancelDraft(draft),

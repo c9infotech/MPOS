@@ -1,9 +1,12 @@
+import 'dart:convert';
+
 import '../api/api_client.dart';
 import '../auth/auth_service.dart';
 import '../config/config_loader.dart';
 import '../../models/customer.dart';
 import '../../models/delivery_note.dart';
 import '../../models/payment_mode.dart';
+import '../../models/pos_draft.dart';
 import '../../models/product.dart';
 
 class PosRepository {
@@ -130,6 +133,125 @@ class PosRepository {
     }
   }
 
+  Future<void> insertDraft({
+    required int tableNumber,
+    required String subdivision,
+    required String currency,
+    required List<CartLine> lines,
+    Customer? customer,
+  }) async {
+    final payloadCustomer = customer == null
+        ? {
+            'cardCode': '',
+            'cardName': '',
+            'customerName': '',
+            'tin': '',
+            'currency': currency,
+            'room': '',
+            'contact': '',
+            'whsCode': '',
+          }
+        : {
+            'cardCode': customer.cardCode,
+            'cardName': customer.cardName,
+            'customerName': customer.customerName,
+            'tin': customer.tin,
+            'currency': customer.currency,
+            'room': customer.room,
+            'contact': customer.contact,
+            'whsCode': customer.whsCode,
+          };
+    final payload = {
+      'tableNumber': tableNumber,
+      'subdivision': subdivision,
+      'currency': currency,
+      'customer': payloadCustomer,
+      'lines': lines
+          .map(
+            (line) => {
+              'product': {
+                'itemCode': line.product.itemCode,
+                'itemName': line.product.itemName,
+                'isdelivered': line.isDelivered,
+                'isDelivered': line.isDelivered,
+                'salUnitMsr': line.product.salUnitMsr,
+                'uomName': line.product.uomName,
+                'usdPrice': line.product.usdPrice,
+                'tzsPrice': line.product.tzsPrice,
+                'usduomPrice': line.product.usduomPrice,
+                'tzsuomPrice': line.product.tzsuomPrice,
+                'qtyPerUom': line.product.qtyPerUom,
+                'itemUom': line.product.itemUom,
+                'isPriceEditable': line.product.isPriceEditable,
+                'premiumDrinks': line.product.isPremiumDrink ? 'Y' : 'N',
+                // Never send null/HTML image payloads — backend JSON parser fails on "<".
+                'image': _safeImageValue(line.product.image),
+              },
+              'qty': line.qty,
+              'cartPrice': line.cartPrice,
+              'cartUom': line.cartUom,
+              'chargeable': line.chargeable,
+              'isDelivered': line.isDelivered,
+              'IsDelivered': line.isDelivered,
+              'withGst': line.withGst,
+            },
+          )
+          .toList(),
+    };
+
+    final data = await _api.post('InsertDraft', payload);
+    if (!_isSuccessStatus(data['statusCode'])) {
+      throw ApiException(ApiClient.extractError(data));
+    }
+  }
+
+  Future<List<SavedPosDraft>> fetchDrafts({String draftId = ''}) async {
+    final data = await _api.post('GetDraft', {'DraftID': draftId});
+    if (!_isSuccessStatus(data['statusCode'])) {
+      throw ApiException(ApiClient.extractError(data));
+    }
+    final rows = _normalizeResponseData(data['responseData']);
+    final listRows = rows is List
+        ? rows
+        : (rows is Map ? [rows] : const []);
+    if (listRows.isEmpty) return [];
+    final now = DateTime.now();
+    final parsed = <SavedPosDraft>[];
+    for (final rowRaw in listRows) {
+      final row = _asMap(rowRaw);
+      if (row == null) continue;
+      final linesRaw = row['lines'];
+      final lineList = linesRaw is List
+          ? linesRaw
+              .map(_asMap)
+              .whereType<Map<String, dynamic>>()
+              .map(_draftLine)
+              .toList()
+          : <CartLine>[];
+      parsed.add(SavedPosDraft(
+        id: (row['draftId'] ?? row['id'] ?? '').toString(),
+        slot: PosDraftSlot(
+          tableNumber: _toInt(row['tableNumber']),
+          subdivision: (row['subdivision'] ?? '').toString(),
+        ),
+        lines: lineList,
+        currency: (row['currency'] ?? 'USD').toString(),
+        savedAt: now,
+        customer: _asMap(row['customer']) == null
+            ? null
+            : Customer.fromJson(_asMap(row['customer'])!),
+      ));
+    }
+    return parsed;
+  }
+
+  Future<void> deleteDraft(String draftId) async {
+    final data = await _api.post('DeleteDraft', {'DraftID': draftId});
+    if (!_isSuccessStatus(data['statusCode'])) {
+      throw ApiException(ApiClient.extractError(data));
+    }
+  }
+
   Future<List<DeliveryNote>> fetchDeliveryNotes() async {
     final data = await _api.post('DeliveryNoteDetails', {
       'UserCode': _session.userCode,
@@ -208,5 +330,84 @@ class PosRepository {
     final mm = now.month.toString().padLeft(2, '0');
     final dd = now.day.toString().padLeft(2, '0');
     return '${now.year}-$mm-$dd';
+  }
+
+  CartLine _draftLine(Map<String, dynamic> json) {
+    final productJson = _asMap(json['product']) ?? const <String, dynamic>{};
+    final product = Product.fromJson(productJson);
+    final chargeable = product.isPremiumDrink
+        ? true
+        : _toBool(json['chargeable']);
+    final qtyRaw = json['qty'];
+    final qty = qtyRaw is num
+        ? qtyRaw.toInt()
+        : (double.tryParse(qtyRaw?.toString() ?? '1') ?? 1).toInt();
+    return CartLine(
+      product: product,
+      qty: qty < 1 ? 1 : qty,
+      cartPrice: _toDouble(json['cartPrice']),
+      cartUom: (json['cartUom'] ?? '').toString(),
+      chargeable: chargeable,
+      isDelivered: _toBool(
+        json['isDelivered'] ??
+            json['IsDelivered'] ??
+            json['delivered'] ??
+            productJson['isdelivered'] ??
+            productJson['isDelivered'],
+      ),
+      withGst: _toDouble(json['withGst']),
+    );
+  }
+
+  double _toDouble(dynamic value) {
+    if (value == null) return 0;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0;
+  }
+
+  bool _toBool(dynamic value) {
+    if (value is bool) return value;
+    final raw = value?.toString().trim().toLowerCase();
+    return raw == 'true' || raw == '1' || raw == 'y';
+  }
+
+  int _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  bool _isSuccessStatus(dynamic statusCode) {
+    if (statusCode is num) return statusCode.toInt() == 0;
+    return statusCode?.toString().trim() == '0';
+  }
+
+  Map<String, dynamic>? _asMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) {
+      return value.map((key, val) => MapEntry(key.toString(), val));
+    }
+    return null;
+  }
+
+  dynamic _normalizeResponseData(dynamic raw) {
+    if (raw is String) {
+      final text = raw.trim();
+      if (text.isEmpty) return const [];
+      try {
+        return jsonDecode(text);
+      } catch (_) {
+        return const [];
+      }
+    }
+    return raw;
+  }
+
+  /// Backend fails when image is null or contains HTML (`<...>`).
+  String _safeImageValue(String? image) {
+    final value = image?.trim() ?? '';
+    if (value.isEmpty) return '';
+    if (value.startsWith('<')) return '';
+    return value;
   }
 }

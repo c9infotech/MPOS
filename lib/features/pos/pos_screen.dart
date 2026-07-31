@@ -583,6 +583,11 @@ class _PosScreenState extends State<PosScreen> {
           backgroundColor: AppColors.success,
         ),
       );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -652,12 +657,21 @@ class _PosScreenState extends State<PosScreen> {
       );
       await AppScope.of(context).posDrafts.removeLinkedDraftAfterCheckout();
       if (!mounted) return;
-      setState(() => _cart.clear());
+      setState(() {
+        _cart.clear();
+        _selectedCustomer = null;
+        _currency = 'USD';
+        _searchController.clear();
+        _selectedCategory = 'All';
+        _clearPriceControllers();
+      });
       await showPrintAfterSuccessDialog(
         context,
         message: 'Delivery Note saved.',
         receipt: receipt,
       );
+      if (!mounted) return;
+      await _load(); // refresh products + customers after checkout
     } on ApiException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
