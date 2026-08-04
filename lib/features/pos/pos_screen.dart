@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -713,6 +714,9 @@ class _PosScreenState extends State<PosScreen> {
     return colors[index % colors.length];
   }
 
+  int get _productGridCrossAxisCount =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows ? 4 : 2;
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -961,9 +965,8 @@ class _PosScreenState extends State<PosScreen> {
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                     sliver: SliverGrid(
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: _productGridCrossAxisCount,
                         mainAxisSpacing: 12,
                         crossAxisSpacing: 12,
                         childAspectRatio: 0.78,
