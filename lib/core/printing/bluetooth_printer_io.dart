@@ -38,6 +38,8 @@ Future<void> clearSavedPrinter() async {
 
 Future<bool> ensurePermissions() async {
   if (!isSupported) return false;
+  // Windows plugin does not expose permission APIs.
+  if (Platform.isWindows) return true;
   if (Platform.isAndroid) {
     final statuses = await [
       Permission.bluetoothConnect,
@@ -57,6 +59,8 @@ Future<bool> ensurePermissions() async {
 
 Future<bool> isBluetoothOn() async {
   if (!isSupported) return false;
+  // Windows plugin does not expose bluetoothEnabled — assume on and let connect fail.
+  if (Platform.isWindows) return true;
   return PrintBluetoothThermal.bluetoothEnabled;
 }
 

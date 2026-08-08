@@ -1,5 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'printer_platform.dart';
 import 'printer_type.dart';
 
 abstract final class PrinterPrefs {
@@ -10,7 +11,7 @@ abstract final class PrinterPrefs {
     final value = prefs.getString(_typeKey);
     return PrinterType.values.firstWhere(
       (t) => t.name == value,
-      orElse: () => PrinterType.bluetooth,
+      orElse: () => PrinterPlatform.defaultType,
     );
   }
 

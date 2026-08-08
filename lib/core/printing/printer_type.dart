@@ -5,4 +5,7 @@ enum PrinterType {
 
   /// Built-in Android POS thermal printer (Sunmi / compatible).
   builtin,
+
+  /// Installed Windows system printer (USB/driver), RAW ESC/POS.
+  windows,
 }

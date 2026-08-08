@@ -92,6 +92,23 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
   Future<void> _openPayment(List<DeliveryNote> notes) async {
     if (notes.isEmpty) return;
+    final customerCode = notes.first.cardCode.trim();
+    final modesForCustomer = _paymentModes
+        .where((m) => m.matchesCustomer(customerCode))
+        .toList();
+    if (modesForCustomer.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            customerCode.isEmpty
+                ? 'No payment modes available for this customer.'
+                : 'No payment modes found for customer $customerCode.',
+          ),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
     final receipt = await showModalBottomSheet<ReceiptData>(
       context: context,
       isScrollControlled: true,
@@ -99,7 +116,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
       builder: (context) {
         return _PaymentSheet(
           notes: notes,
-          paymentModes: _paymentModes,
+          paymentModes: modesForCustomer,
         );
       },
     );

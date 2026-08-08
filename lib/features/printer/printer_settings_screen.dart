@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/printing/bluetooth_printer_service.dart';
 import '../../core/printing/builtin_printer_service.dart';
+import '../../core/printing/printer_platform.dart';
 import '../../core/printing/printer_prefs.dart';
 import '../../core/printing/printer_type.dart';
 import '../../core/printing/receipt_builder.dart';
 import '../../core/printing/receipt_data.dart';
+import '../../core/printing/windows_system_printer_service.dart';
 import '../../core/theme/app_colors.dart';
 
 class PrinterSettingsScreen extends StatefulWidget {
@@ -29,10 +31,18 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   List<PrinterDeviceInfo> _btDevices = [];
   String? _btStatus;
 
+  // Windows system
+  String? _savedWinName;
+  String? _defaultWinName;
+  List<String> _winPrinters = [];
+  String? _winStatus;
+
   // Built-in
   BuiltInPrinterInfo? _builtInInfo;
   bool _builtInAvailable = false;
   String? _builtInStatus;
+
+  bool get _isWindows => PrinterPlatform.isWindowsDesktop;
 
   @override
   void initState() {
@@ -43,6 +53,14 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     _type = await PrinterPrefs.getType();
+    // Migrate invalid type for this platform.
+    if (_isWindows && _type == PrinterType.builtin) {
+      _type = PrinterType.windows;
+      await PrinterPrefs.setType(_type);
+    } else if (!_isWindows && _type == PrinterType.windows) {
+      _type = PrinterType.bluetooth;
+      await PrinterPrefs.setType(_type);
+    }
     await _refreshCurrentMode();
     if (mounted) setState(() => _loading = false);
   }
@@ -50,6 +68,8 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   Future<void> _refreshCurrentMode() async {
     if (_type == PrinterType.bluetooth) {
       await _refreshBluetooth();
+    } else if (_type == PrinterType.windows) {
+      await _refreshWindows();
     } else {
       await _refreshBuiltIn();
     }
@@ -59,7 +79,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     _btStatus = null;
     if (!BluetoothPrinterService.isSupported) {
       _btStatus =
-          'Bluetooth printing is not available on this platform (use Android/iOS).';
+          'Bluetooth printing is not available on this platform.';
       return;
     }
 
@@ -79,8 +99,35 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     _savedBtMac = await BluetoothPrinterService.getSavedPrinterMac();
     _btDevices = await BluetoothPrinterService.pairedDevices();
     if (_btDevices.isEmpty) {
-      _btStatus =
-          'No paired devices. Pair your thermal printer in Bluetooth settings, then tap Refresh.';
+      _btStatus = _isWindows
+          ? 'No Bluetooth printers found. For USB POS-58, switch to Windows printer mode.'
+          : 'No paired devices. Pair your thermal printer in Bluetooth settings, then tap Refresh.';
+    }
+  }
+
+  Future<void> _refreshWindows() async {
+    _winStatus = null;
+    if (!WindowsSystemPrinterService.isSupported) {
+      _winStatus = 'Windows printer mode is only available on Windows desktop.';
+      return;
+    }
+
+    _savedWinName = await WindowsSystemPrinterService.getSavedPrinterName();
+    _defaultWinName = await WindowsSystemPrinterService.getDefaultPrinterName();
+    _winPrinters = await WindowsSystemPrinterService.listPrinters();
+
+    if (_winPrinters.isEmpty) {
+      _winStatus =
+          'No printers found. Install POS-58 in Windows Settings → Printers & scanners, then Refresh.';
+      return;
+    }
+
+    if ((_savedWinName == null || _savedWinName!.isEmpty) &&
+        _defaultWinName != null &&
+        _defaultWinName!.isNotEmpty) {
+      // Prefer default when nothing saved yet (e.g. POS-58 set as default).
+      _savedWinName = _defaultWinName;
+      await WindowsSystemPrinterService.savePrinterName(_defaultWinName!);
     }
   }
 
@@ -137,6 +184,21 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     }
   }
 
+  Future<void> _selectWindows(String name) async {
+    setState(() => _busy = true);
+    try {
+      await WindowsSystemPrinterService.savePrinterName(name);
+      if (!mounted) return;
+      setState(() => _savedWinName = name);
+      _snack('Saved printer: $name');
+    } catch (e) {
+      if (!mounted) return;
+      _snack('$e', error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _clearBluetooth() async {
     await BluetoothPrinterService.clearSavedPrinter();
     await BluetoothPrinterService.disconnect();
@@ -145,6 +207,12 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
       _savedBtName = null;
       _savedBtMac = null;
     });
+  }
+
+  Future<void> _clearWindows() async {
+    await WindowsSystemPrinterService.clearSavedPrinter();
+    if (!mounted) return;
+    setState(() => _savedWinName = null);
   }
 
   Future<void> _testPrint() async {
@@ -173,6 +241,12 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
           throw Exception('Built-in printer not available on this device');
         }
         await BuiltInPrinterService.printBytes(bytes);
+      } else if (_type == PrinterType.windows) {
+        final name = _savedWinName;
+        if (name == null || name.isEmpty) {
+          throw Exception('Select a Windows printer first');
+        }
+        await WindowsSystemPrinterService.printBytes(bytes, printerName: name);
       } else {
         if (_savedBtMac == null || _savedBtMac!.isEmpty) {
           throw Exception('Select a Bluetooth printer first');
@@ -199,6 +273,35 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
         backgroundColor: error ? AppColors.error : AppColors.success,
       ),
     );
+  }
+
+  List<ButtonSegment<PrinterType>> get _segments {
+    if (_isWindows) {
+      return const [
+        ButtonSegment(
+          value: PrinterType.windows,
+          label: Text('Windows'),
+          icon: Icon(Icons.print),
+        ),
+        ButtonSegment(
+          value: PrinterType.bluetooth,
+          label: Text('Bluetooth'),
+          icon: Icon(Icons.bluetooth),
+        ),
+      ];
+    }
+    return const [
+      ButtonSegment(
+        value: PrinterType.bluetooth,
+        label: Text('Bluetooth'),
+        icon: Icon(Icons.bluetooth),
+      ),
+      ButtonSegment(
+        value: PrinterType.builtin,
+        label: Text('Built-in POS'),
+        icon: Icon(Icons.point_of_sale),
+      ),
+    ];
   }
 
   @override
@@ -241,18 +344,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                 ),
                 const SizedBox(height: 8),
                 SegmentedButton<PrinterType>(
-                  segments: const [
-                    ButtonSegment(
-                      value: PrinterType.bluetooth,
-                      label: Text('Bluetooth'),
-                      icon: Icon(Icons.bluetooth),
-                    ),
-                    ButtonSegment(
-                      value: PrinterType.builtin,
-                      label: Text('Built-in POS'),
-                      icon: Icon(Icons.point_of_sale),
-                    ),
-                  ],
+                  segments: _segments,
                   selected: {_type},
                   onSelectionChanged: (value) {
                     if (value.isNotEmpty) _setType(value.first);
@@ -260,6 +352,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                 ),
                 const SizedBox(height: 16),
                 if (_type == PrinterType.bluetooth) _buildBluetoothSection(),
+                if (_type == PrinterType.windows) _buildWindowsSection(),
                 if (_type == PrinterType.builtin) _buildBuiltInSection(),
                 const SizedBox(height: 16),
                 FilledButton.icon(
@@ -281,6 +374,81 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _buildWindowsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_winStatus != null) ...[
+          _InfoBanner(text: _winStatus!),
+          const SizedBox(height: 12),
+        ],
+        Card(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: ListTile(
+            leading: const Icon(Icons.print, color: AppColors.emerald),
+            title: Text(
+              _savedWinName?.isNotEmpty == true
+                  ? _savedWinName!
+                  : 'No printer selected',
+            ),
+            subtitle: Text(
+              _defaultWinName != null && _defaultWinName!.isNotEmpty
+                  ? 'Windows default: $_defaultWinName'
+                  : 'Select an installed printer below (e.g. POS-58)',
+            ),
+            trailing: _savedWinName != null
+                ? IconButton(
+                    tooltip: 'Clear',
+                    onPressed: _clearWindows,
+                    icon: const Icon(Icons.link_off),
+                  )
+                : null,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Uses RAW ESC/POS to the Windows printer driver. Use this for USB thermal printers like POS-58 (not Chrome print dialog).',
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'Installed printers',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+        ),
+        const SizedBox(height: 8),
+        if (_winPrinters.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text(
+              'No printers listed.',
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+          )
+        else
+          ..._winPrinters.map(
+            (name) => Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: ListTile(
+                title: Text(name),
+                subtitle: name == _defaultWinName
+                    ? const Text('Windows default')
+                    : null,
+                trailing: _savedWinName == name
+                    ? const Icon(Icons.check_circle, color: AppColors.emerald)
+                    : const Icon(Icons.chevron_right),
+                onTap: _busy ? null : () => _selectWindows(name),
+              ),
+            ),
+          ),
+      ],
     );
   }
 

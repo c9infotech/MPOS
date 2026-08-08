@@ -7,6 +7,7 @@ import 'printer_prefs.dart';
 import 'printer_type.dart';
 import 'receipt_builder.dart';
 import 'receipt_data.dart';
+import 'windows_system_printer_service.dart';
 
 Future<bool> printReceipt(
   BuildContext context,
@@ -18,6 +19,14 @@ Future<bool> printReceipt(
   if (!context.mounted) return false;
   if (type == PrinterType.builtin) {
     return _printBuiltIn(
+      context,
+      receipt,
+      includeCustomerSign: includeCustomerSign,
+      showToast: showToast,
+    );
+  }
+  if (type == PrinterType.windows) {
+    return _printWindows(
       context,
       receipt,
       includeCustomerSign: includeCustomerSign,
@@ -89,6 +98,64 @@ Future<bool> _printBuiltIn(
   }
 }
 
+Future<bool> _printWindows(
+  BuildContext context,
+  ReceiptData receipt, {
+  required bool includeCustomerSign,
+  bool showToast = true,
+}) async {
+  if (!WindowsSystemPrinterService.isSupported) {
+    _toast(
+      context,
+      'Windows printer mode is only available on Windows desktop.',
+      error: true,
+    );
+    return false;
+  }
+
+  var printerName = await WindowsSystemPrinterService.getSavedPrinterName();
+  if (printerName == null || printerName.isEmpty) {
+    printerName = await WindowsSystemPrinterService.getDefaultPrinterName();
+  }
+  if (printerName == null || printerName.isEmpty) {
+    if (!context.mounted) return false;
+    printerName = await _pickWindowsPrinter(context);
+    if (printerName == null) return false;
+  }
+
+  if (!context.mounted) return false;
+  _showPrintingDialog(context);
+
+  try {
+    final bytes = await ReceiptBuilder.build(
+      receipt,
+      includeCustomerSign: includeCustomerSign,
+    );
+    await WindowsSystemPrinterService.printBytes(
+      bytes,
+      printerName: printerName,
+    );
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      if (showToast) {
+        _toast(
+          context,
+          includeCustomerSign
+              ? 'Receipt printed (with Customer Sign).'
+              : 'Copy printed (without Customer Sign).',
+        );
+      }
+    }
+    return true;
+  } catch (e) {
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      _toast(context, e.toString(), error: true);
+    }
+    return false;
+  }
+}
+
 Future<bool> _printBluetooth(
   BuildContext context,
   ReceiptData receipt, {
@@ -98,7 +165,7 @@ Future<bool> _printBluetooth(
   if (!BluetoothPrinterService.isSupported) {
     _toast(
       context,
-      'Bluetooth printing works on Android/iOS devices only.',
+      'Bluetooth printing is not available on this platform.',
       error: true,
     );
     return false;
@@ -242,13 +309,59 @@ Future<void> showPrintAfterSuccessDialog(
   );
 }
 
+Future<String?> _pickWindowsPrinter(BuildContext context) async {
+  final printers = await WindowsSystemPrinterService.listPrinters();
+  if (!context.mounted) return null;
+  if (printers.isEmpty) {
+    _toast(
+      context,
+      'No Windows printers found. Install POS-58 in Windows Printers & scanners, then try again.',
+      error: true,
+    );
+    return null;
+  }
+
+  return showModalBottomSheet<String>(
+    context: context,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (ctx) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Select Windows printer',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+              ),
+            ),
+            for (final name in printers)
+              ListTile(
+                leading: const Icon(Icons.print, color: AppColors.emerald),
+                title: Text(name),
+                onTap: () async {
+                  await WindowsSystemPrinterService.savePrinterName(name);
+                  if (ctx.mounted) Navigator.pop(ctx, name);
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 Future<String?> _pickBluetoothPrinter(BuildContext context) async {
   final devices = await BluetoothPrinterService.pairedDevices();
   if (!context.mounted) return null;
   if (devices.isEmpty) {
     _toast(
       context,
-      'No paired printers found. Pair your printer in phone Bluetooth settings, then try again.',
+      'No paired printers found. Pair your printer in Bluetooth settings, then try again.',
       error: true,
     );
     return null;
