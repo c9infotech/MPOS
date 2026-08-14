@@ -80,12 +80,7 @@ Future<bool> _printBuiltIn(
     if (context.mounted) {
       Navigator.of(context, rootNavigator: true).pop();
       if (showToast) {
-        _toast(
-          context,
-          includeCustomerSign
-              ? 'Receipt printed (with Customer Sign).'
-              : 'Copy printed (without Customer Sign).',
-        );
+        _toast(context, 'Receipt printed (with Customer Sign).');
       }
     }
     return true;
@@ -138,12 +133,7 @@ Future<bool> _printWindows(
     if (context.mounted) {
       Navigator.of(context, rootNavigator: true).pop();
       if (showToast) {
-        _toast(
-          context,
-          includeCustomerSign
-              ? 'Receipt printed (with Customer Sign).'
-              : 'Copy printed (without Customer Sign).',
-        );
+        _toast(context, 'Receipt printed (with Customer Sign).');
       }
     }
     return true;
@@ -212,12 +202,7 @@ Future<bool> _printBluetooth(
     if (context.mounted) {
       Navigator.of(context, rootNavigator: true).pop();
       if (showToast) {
-        _toast(
-          context,
-          includeCustomerSign
-              ? 'Receipt printed (with Customer Sign).'
-              : 'Copy printed (without Customer Sign).',
-        );
+        _toast(context, 'Receipt printed (with Customer Sign).');
       }
     }
     return true;
@@ -230,7 +215,8 @@ Future<bool> _printBluetooth(
   }
 }
 
-/// First print with Customer Sign, then same dialog button becomes Print(CC).
+/// First print, then same dialog button becomes Print(CC).
+/// Both copies include Customer Sign.
 Future<void> showPrintAfterSuccessDialog(
   BuildContext context, {
   required String message,
@@ -242,7 +228,7 @@ Future<void> showPrintAfterSuccessDialog(
     context: context,
     barrierDismissible: false,
     builder: (dialogContext) {
-      var printedWithSign = false;
+      var printedOnce = false;
       var printing = false;
 
       return StatefulBuilder(
@@ -250,22 +236,21 @@ Future<void> showPrintAfterSuccessDialog(
           Future<void> handlePrint() async {
             if (printing) return;
             setDialogState(() => printing = true);
-            final withSign = !printedWithSign;
             final ok = await printReceipt(
               dialogContext,
               receipt,
-              includeCustomerSign: withSign,
+              includeCustomerSign: true,
               showToast: false,
             );
             if (!dialogContext.mounted) return;
-            if (ok && !withSign) {
+            if (ok && printedOnce) {
               // Print(CC) finished — close dialog.
               Navigator.pop(dialogContext);
               return;
             }
             setDialogState(() {
               printing = false;
-              if (ok && withSign) printedWithSign = true;
+              if (ok) printedOnce = true;
             });
           }
 
@@ -298,7 +283,7 @@ Future<void> showPrintAfterSuccessDialog(
                       )
                     : const Icon(Icons.print),
                 label: Text(
-                  printedWithSign ? 'Print(CC)' : 'Print receipt',
+                  printedOnce ? 'Print(CC)' : 'Print receipt',
                 ),
               ),
             ],

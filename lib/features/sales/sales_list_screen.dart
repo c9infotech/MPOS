@@ -21,7 +21,6 @@ class _SalesListScreenState extends State<SalesListScreen> {
   bool _loading = true;
   String? _error;
   List<DeliveryNote> _notes = [];
-  List<PaymentMode> _paymentModes = [];
   final Set<String> _selectedDocNums = {};
   bool _didLoad = false;
 
@@ -40,14 +39,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
     });
     try {
       final repo = AppScope.of(context).repository;
-      final results = await Future.wait([
-        repo.fetchDeliveryNotes(),
-        repo.fetchPaymentModes(),
-      ]);
+      final notes = await repo.fetchDeliveryNotes();
       if (!mounted) return;
       setState(() {
-        _notes = results[0] as List<DeliveryNote>;
-        _paymentModes = results[1] as List<PaymentMode>;
+        _notes = notes;
         _selectedDocNums.clear();
         _loading = false;
       });
@@ -93,22 +88,64 @@ class _SalesListScreenState extends State<SalesListScreen> {
   Future<void> _openPayment(List<DeliveryNote> notes) async {
     if (notes.isEmpty) return;
     final customerCode = notes.first.cardCode.trim();
-    final modesForCustomer = _paymentModes
-        .where((m) => m.matchesCustomer(customerCode))
-        .toList();
+    if (customerCode.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No payment modes available for this customer.'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      ),
+    );
+
+    List<PaymentMode> modesForCustomer;
+    try {
+      final repo = AppScope.of(context).repository;
+      modesForCustomer = await repo.fetchPaymentModes(
+        customerCode: customerCode,
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
+      );
+      return;
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString()),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pop();
+
     if (modesForCustomer.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            customerCode.isEmpty
-                ? 'No payment modes available for this customer.'
-                : 'No payment modes found for customer $customerCode.',
+            'No payment modes found for customer $customerCode.',
           ),
           backgroundColor: AppColors.error,
         ),
       );
       return;
     }
+
     final receipt = await showModalBottomSheet<ReceiptData>(
       context: context,
       isScrollControlled: true,

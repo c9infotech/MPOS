@@ -265,8 +265,12 @@ class PosRepository {
         .toList();
   }
 
-  Future<List<PaymentMode>> fetchPaymentModes() async {
-    final data = await _api.post('PaymentMode', {});
+  Future<List<PaymentMode>> fetchPaymentModes({
+    required String customerCode,
+  }) async {
+    final data = await _api.post('PaymentMode', {
+      'CustomerCode': customerCode.trim(),
+    });
     final list = data['responseData'];
     if (list is! List) return [];
     return list
