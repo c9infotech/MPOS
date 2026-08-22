@@ -6,6 +6,9 @@ import 'package:ffi/ffi.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:win32/win32.dart';
 
+import 'receipt_paper.dart';
+import 'windows_printer_paper_info.dart';
+
 const _nameKey = 'windows_system_printer_name';
 
 bool get isSupported => Platform.isWindows;
@@ -75,6 +78,80 @@ Future<void> savePrinterName(String name) async {
 Future<void> clearSavedPrinter() async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.remove(_nameKey);
+}
+
+Future<String?> _resolvePrinterName(String? printerName) async {
+  var target = printerName?.trim();
+  if (target == null || target.isEmpty) {
+    target = await getSavedPrinterName();
+  }
+  if (target == null || target.isEmpty) {
+    target = await getDefaultPrinterName();
+  }
+  if (target == null || target.isEmpty) return null;
+  return target;
+}
+
+/// Reads the configured paper width from Windows printer DEVMODE.
+Future<WindowsPrinterPaperInfo?> getPrinterPaperInfo({String? printerName}) async {
+  if (!isSupported) return null;
+
+  final target = await _resolvePrinterName(printerName);
+  if (target == null) return null;
+
+  return using((arena) {
+    final handlePtr = arena<Pointer<NativeType>>();
+    final open = OpenPrinter(arena.pcwstr(target), handlePtr, null);
+    if (!open.value) {
+      return WindowsPrinterPaperInfo(
+        paperSize: resolveWindowsPaperSize(printerName: target),
+        printerName: target,
+      );
+    }
+
+    final hPrinter = PRINTER_HANDLE(handlePtr.value);
+    double? widthMm;
+    try {
+      final needed = arena<Uint32>();
+      GetPrinter(hPrinter, 2, null, 0, needed);
+      if (needed.value == 0) {
+        return WindowsPrinterPaperInfo(
+          paperSize: resolveWindowsPaperSize(printerName: target),
+          printerName: target,
+        );
+      }
+
+      final buffer = arena<Uint8>(needed.value);
+      final result = GetPrinter(hPrinter, 2, buffer, needed.value, needed);
+      if (!result.value) {
+        return WindowsPrinterPaperInfo(
+          paperSize: resolveWindowsPaperSize(printerName: target),
+          printerName: target,
+        );
+      }
+
+      final info = buffer.cast<PRINTER_INFO_2>();
+      final devMode = info.ref.pDevMode;
+      if (devMode != nullptr) {
+        // DEVMODE paper width is stored in tenths of a millimeter.
+        final tenthsMm = devMode.ref.dmPaperWidth;
+        if (tenthsMm > 0) {
+          widthMm = tenthsMm / 10.0;
+        }
+      }
+    } finally {
+      ClosePrinter(hPrinter);
+    }
+
+    return WindowsPrinterPaperInfo(
+      paperSize: resolveWindowsPaperSize(
+        printerName: target,
+        devModeWidthMm: widthMm,
+      ),
+      widthMm: widthMm,
+      printerName: target,
+    );
+  });
 }
 
 Future<void> printBytes(List<int> bytes, {String? printerName}) async {

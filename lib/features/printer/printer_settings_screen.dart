@@ -1,3 +1,4 @@
+import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -36,6 +37,8 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
   String? _defaultWinName;
   List<String> _winPrinters = [];
   String? _winStatus;
+  double? _winPaperWidthMm;
+  String? _winPaperLabel;
 
   // Built-in
   BuiltInPrinterInfo? _builtInInfo;
@@ -115,6 +118,8 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     _savedWinName = await WindowsSystemPrinterService.getSavedPrinterName();
     _defaultWinName = await WindowsSystemPrinterService.getDefaultPrinterName();
     _winPrinters = await WindowsSystemPrinterService.listPrinters();
+    _winPaperWidthMm = null;
+    _winPaperLabel = null;
 
     if (_winPrinters.isEmpty) {
       _winStatus =
@@ -129,6 +134,39 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
       _savedWinName = _defaultWinName;
       await WindowsSystemPrinterService.savePrinterName(_defaultWinName!);
     }
+
+    final activeName = _savedWinName ?? _defaultWinName;
+    if (activeName != null && activeName.isNotEmpty) {
+      final paperInfo = await WindowsSystemPrinterService.getPrinterPaperInfo(
+        printerName: activeName,
+      );
+      _winPaperWidthMm = paperInfo?.widthMm;
+      _winPaperLabel = _paperLabel(paperInfo?.paperSize);
+    }
+  }
+
+  String _paperLabel(PaperSize? paper) {
+    if (paper == PaperSize.mm80) return '80mm';
+    if (paper == PaperSize.mm72) return '72mm';
+    return '58mm';
+  }
+
+  String _windowsPrinterSubtitle() {
+    final parts = <String>[];
+    if (_winPaperLabel != null) {
+      var layout = 'Receipt layout: $_winPaperLabel';
+      if (_winPaperWidthMm != null) {
+        layout += ' (${_winPaperWidthMm!.toStringAsFixed(1)} mm from driver)';
+      }
+      parts.add(layout);
+    }
+    if (_defaultWinName != null && _defaultWinName!.isNotEmpty) {
+      parts.add('Windows default: $_defaultWinName');
+    }
+    if (parts.isEmpty) {
+      return 'Select an installed printer below (e.g. POS-58)';
+    }
+    return parts.join(' · ');
   }
 
   Future<void> _refreshBuiltIn() async {
@@ -189,8 +227,15 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
     try {
       await WindowsSystemPrinterService.savePrinterName(name);
       if (!mounted) return;
-      setState(() => _savedWinName = name);
-      _snack('Saved printer: $name');
+      final paperInfo = await WindowsSystemPrinterService.getPrinterPaperInfo(
+        printerName: name,
+      );
+      setState(() {
+        _savedWinName = name;
+        _winPaperWidthMm = paperInfo?.widthMm;
+        _winPaperLabel = _paperLabel(paperInfo?.paperSize);
+      });
+      _snack('Saved printer: $name (${_winPaperLabel ?? '58mm'})');
     } catch (e) {
       if (!mounted) return;
       _snack('$e', error: true);
@@ -234,20 +279,31 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
         total: 0,
         footer: 'Printer OK',
       );
-      final bytes = await ReceiptBuilder.build(receipt);
 
       if (_type == PrinterType.builtin) {
         if (!_builtInAvailable) {
           throw Exception('Built-in printer not available on this device');
         }
+        final bytes = await ReceiptBuilder.build(receipt);
         await BuiltInPrinterService.printBytes(bytes);
       } else if (_type == PrinterType.windows) {
         final name = _savedWinName;
         if (name == null || name.isEmpty) {
           throw Exception('Select a Windows printer first');
         }
+        final paperInfo = await WindowsSystemPrinterService.getPrinterPaperInfo(
+          printerName: name,
+        );
+        final paper = paperInfo?.paperSize ?? PaperSize.mm58;
+        final bytes = await ReceiptBuilder.build(
+          receipt,
+          paper: paper,
+          plainLayout: true,
+          setPrintWidth: true,
+        );
         await WindowsSystemPrinterService.printBytes(bytes, printerName: name);
       } else {
+        final bytes = await ReceiptBuilder.build(receipt);
         if (_savedBtMac == null || _savedBtMac!.isEmpty) {
           throw Exception('Select a Bluetooth printer first');
         }
@@ -396,11 +452,7 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                   ? _savedWinName!
                   : 'No printer selected',
             ),
-            subtitle: Text(
-              _defaultWinName != null && _defaultWinName!.isNotEmpty
-                  ? 'Windows default: $_defaultWinName'
-                  : 'Select an installed printer below (e.g. POS-58)',
-            ),
+            subtitle: Text(_windowsPrinterSubtitle()),
             trailing: _savedWinName != null
                 ? IconButton(
                     tooltip: 'Clear',

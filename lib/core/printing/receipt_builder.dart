@@ -2,13 +2,16 @@ import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:intl/intl.dart';
 
 import 'receipt_data.dart';
+import 'receipt_paper.dart';
 
-/// Builds ESC/POS bytes for 58mm Bluetooth thermal printers.
+/// Builds ESC/POS bytes for thermal printers (58mm / 72mm / 80mm).
 class ReceiptBuilder {
   static Future<List<int>> build(
     ReceiptData receipt, {
     PaperSize paper = PaperSize.mm58,
     bool includeCustomerSign = true,
+    bool plainLayout = false,
+    bool setPrintWidth = false,
   }) async {
     final profile = await CapabilityProfile.load();
     final generator = Generator(paper, profile);
@@ -16,8 +19,12 @@ class ReceiptBuilder {
     final money = NumberFormat('#,##0.00');
     final when = receipt.printedAt ?? DateTime.now();
     final dateFmt = DateFormat('dd MMM yyyy HH:mm');
+    final maxChars = maxCharsForPaper(paper);
 
     bytes.addAll(generator.reset());
+    if (setPrintWidth) {
+      bytes.addAll(escPosSetPrintWidth(paper));
+    }
     // Company header (replaces MPOS / Sales Receipt).
     bytes.addAll(
       generator.text(
@@ -77,10 +84,10 @@ class ReceiptBuilder {
 
     bytes.addAll(generator.text(_safe(dateFmt.format(when))));
     if (receipt.docNo.isNotEmpty) {
-      bytes.addAll(generator.text(_safe('Doc: ${receipt.docNo}')));
+      bytes.addAll(generator.text(_safe('Doc No: ${receipt.docNo}')));
     }
     if (receipt.customerName.isNotEmpty) {
-      bytes.addAll(generator.text(_clip(receipt.customerName, 32)));
+      bytes.addAll(generator.text(_clip(receipt.customerName, maxChars)));
     }
     if (receipt.tin.trim().isNotEmpty) {
       bytes.addAll(generator.text(_safe('TIN No: ${receipt.tin.trim()}')));
@@ -101,64 +108,107 @@ class ReceiptBuilder {
       final name = line.name.isNotEmpty ? line.name : line.code;
       bytes.addAll(
         generator.text(
-          _clip(name, 32),
+          _clip(name, maxChars),
           styles: const PosStyles(bold: true),
         ),
       );
       final qtyPart = line.uom.isEmpty
           ? money.format(line.qty)
           : '${money.format(line.qty)} ${_safe(line.uom)}';
+      if (plainLayout) {
+        bytes.addAll(
+          generator.text(
+            _lineLeftRight(
+              '$qtyPart x ${money.format(line.price)}',
+              money.format(line.lineTotal),
+              maxChars,
+            ),
+          ),
+        );
+      } else {
+        bytes.addAll(
+          generator.row([
+            PosColumn(
+              text: _safe('$qtyPart x ${money.format(line.price)}'),
+              width: 7,
+              styles: const PosStyles(align: PosAlign.left),
+            ),
+            PosColumn(
+              text: money.format(line.lineTotal),
+              width: 5,
+              styles: const PosStyles(align: PosAlign.right),
+            ),
+          ]),
+        );
+      }
+    }
+
+    bytes.addAll(generator.hr());
+    if (plainLayout) {
+      bytes.addAll(
+        generator.text(
+          _lineLeftRight(
+            'Subtotal',
+            '${receipt.currency} ${money.format(receipt.subtotal)}',
+            maxChars,
+          ),
+        ),
+      );
+      bytes.addAll(
+        generator.text(
+          _lineLeftRight(
+            'Tax',
+            '${receipt.currency} ${money.format(receipt.tax)}',
+            maxChars,
+          ),
+        ),
+      );
+      bytes.addAll(
+        generator.text(
+          _lineLeftRight(
+            'TOTAL',
+            '${receipt.currency} ${money.format(receipt.total)}',
+            maxChars,
+          ),
+          styles: const PosStyles(bold: true),
+        ),
+      );
+    } else {
       bytes.addAll(
         generator.row([
+          PosColumn(text: 'Subtotal', width: 7),
           PosColumn(
-            text: _safe('$qtyPart x ${money.format(line.price)}'),
-            width: 7,
-            styles: const PosStyles(align: PosAlign.left),
-          ),
-          PosColumn(
-            text: money.format(line.lineTotal),
+            text: _safe('${receipt.currency} ${money.format(receipt.subtotal)}'),
             width: 5,
             styles: const PosStyles(align: PosAlign.right),
           ),
         ]),
       );
+      bytes.addAll(
+        generator.row([
+          PosColumn(text: 'Tax', width: 7),
+          PosColumn(
+            text: _safe('${receipt.currency} ${money.format(receipt.tax)}'),
+            width: 5,
+            styles: const PosStyles(align: PosAlign.right),
+          ),
+        ]),
+      );
+      bytes.addAll(
+        generator.row([
+          PosColumn(
+            text: 'TOTAL',
+            width: 7,
+            styles: const PosStyles(bold: true),
+          ),
+          PosColumn(
+            text: _safe('${receipt.currency} ${money.format(receipt.total)}'),
+            width: 5,
+            styles: const PosStyles(align: PosAlign.right, bold: true),
+          ),
+        ]),
+      );
     }
-
-    bytes.addAll(generator.hr());
-    bytes.addAll(
-      generator.row([
-        PosColumn(text: 'Subtotal', width: 7),
-        PosColumn(
-          text: _safe('${receipt.currency} ${money.format(receipt.subtotal)}'),
-          width: 5,
-          styles: const PosStyles(align: PosAlign.right),
-        ),
-      ]),
-    );
-    bytes.addAll(
-      generator.row([
-        PosColumn(text: 'Tax', width: 7),
-        PosColumn(
-          text: _safe('${receipt.currency} ${money.format(receipt.tax)}'),
-          width: 5,
-          styles: const PosStyles(align: PosAlign.right),
-        ),
-      ]),
-    );
-    bytes.addAll(
-      generator.row([
-        PosColumn(
-          text: 'TOTAL',
-          width: 7,
-          styles: const PosStyles(bold: true),
-        ),
-        PosColumn(
-          text: _safe('${receipt.currency} ${money.format(receipt.total)}'),
-          width: 5,
-          styles: const PosStyles(align: PosAlign.right, bold: true),
-        ),
-      ]),
-    );
 
     if (receipt.paymentMode.isNotEmpty) {
       bytes.addAll(generator.text(_safe('Pay: ${receipt.paymentMode}')));
@@ -219,5 +269,15 @@ class ReceiptBuilder {
     final safe = _safe(value.trim());
     if (safe.length <= max) return safe;
     return '${safe.substring(0, max - 3)}...';
+  }
+
+  /// Single line with left and right text, padded to [width] chars (58mm-safe).
+  static String _lineLeftRight(String left, String right, int width) {
+    final l = _safe(left.trim());
+    final r = _safe(right.trim());
+    if (l.length + r.length >= width) {
+      return _clip('$l $r', width);
+    }
+    return l + (' ' * (width - l.length - r.length)) + r;
   }
 }

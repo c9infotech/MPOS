@@ -91,7 +91,7 @@ class PosRepository {
         .toList();
   }
 
-  Future<void> createDeliveryNote({
+  Future<String> createDeliveryNote({
     required Customer customer,
     required String currency,
     required List<CartLine> lines,
@@ -131,6 +131,44 @@ class PosRepository {
     if (data['statusCode'] != 0) {
       throw ApiException(ApiClient.extractError(data));
     }
+
+    return _extractDocNum(data) ?? '';
+  }
+
+  /// Reads document number from API response (DeliveryNote / payment).
+  String? _extractDocNum(Map<String, dynamic> data) {
+    final response = data['responseData'];
+    if (response is Map<String, dynamic>) {
+      final fromMap = _docNumFromMap(response);
+      if (fromMap != null) return fromMap;
+    }
+    if (response is List) {
+      for (final item in response) {
+        if (item is Map<String, dynamic>) {
+          final fromItem = _docNumFromMap(item);
+          if (fromItem != null) return fromItem;
+        }
+      }
+    }
+    return _docNumFromMap(data);
+  }
+
+  String? _docNumFromMap(Map<String, dynamic> json) {
+    for (final key in [
+      'docNum',
+      'DocNum',
+      'docnum',
+      'documentNo',
+      'DocumentNo',
+      'docEntry',
+      'DocEntry',
+    ]) {
+      final value = json[key];
+      if (value == null) continue;
+      final text = value.toString().trim();
+      if (text.isNotEmpty) return text;
+    }
+    return null;
   }
 
   Future<void> insertDraft({

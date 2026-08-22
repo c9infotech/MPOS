@@ -1,3 +1,4 @@
+import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
@@ -122,9 +123,16 @@ Future<bool> _printWindows(
   _showPrintingDialog(context);
 
   try {
+    final paperInfo = await WindowsSystemPrinterService.getPrinterPaperInfo(
+      printerName: printerName,
+    );
+    final paper = paperInfo?.paperSize ?? PaperSize.mm58;
     final bytes = await ReceiptBuilder.build(
       receipt,
+      paper: paper,
       includeCustomerSign: includeCustomerSign,
+      plainLayout: true,
+      setPrintWidth: true,
     );
     await WindowsSystemPrinterService.printBytes(
       bytes,

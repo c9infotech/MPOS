@@ -1,3 +1,5 @@
+import 'windows_printer_paper_info.dart';
+
 bool get isSupported => false;
 
 Future<List<String>> listPrinters() async => const [];
@@ -9,6 +11,9 @@ Future<String?> getSavedPrinterName() async => null;
 Future<void> savePrinterName(String name) async {}
 
 Future<void> clearSavedPrinter() async {}
+
+Future<WindowsPrinterPaperInfo?> getPrinterPaperInfo({String? printerName}) async =>
+    null;
 
 Future<void> printBytes(List<int> bytes, {String? printerName}) async {
   throw UnsupportedError(

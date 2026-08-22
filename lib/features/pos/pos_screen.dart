@@ -642,19 +642,20 @@ class _PosScreenState extends State<PosScreen> {
 
     setState(() => _saving = true);
     final repository = AppScope.of(context).repository;
-    final receipt = ReceiptFactory.fromCart(
-      customer: _selectedCustomer!,
-      lines: List<CartLine>.from(_cart),
-      currency: _currency,
-      subtotal: _subtotal,
-      tax: _tax,
-      total: _total,
-    );
     try {
-      await repository.createDeliveryNote(
+      final docNo = await repository.createDeliveryNote(
         customer: _selectedCustomer!,
         currency: _currency,
         lines: _cart,
+      );
+      final receipt = ReceiptFactory.fromCart(
+        customer: _selectedCustomer!,
+        lines: List<CartLine>.from(_cart),
+        currency: _currency,
+        subtotal: _subtotal,
+        tax: _tax,
+        total: _total,
+        docNo: docNo,
       );
       await AppScope.of(context).posDrafts.removeLinkedDraftAfterCheckout();
       if (!mounted) return;
