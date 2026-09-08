@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app.dart';
 import '../../core/app_version.dart';
 import '../../core/api/api_client.dart';
+import '../../core/config/config_loader.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/app_logo.dart';
 import '../main/main_shell.dart';
@@ -23,8 +24,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String _username = '';
   String _password = '';
-  static const _companies = ['KARIBU_CAMPS'];
-  String _company = _companies.first;
+  late final List<String> _companies;
+  late String _company;
   bool _obscure = true;
   bool _loading = false;
   String? _versionLabel;
@@ -32,6 +33,12 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
+    final configured = ConfigLoader.current.companyDbs
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    _companies = configured.isEmpty ? const ['KARIBU_CAMPS'] : configured;
+    _company = _companies.first;
     loadMposVersionLabel().then((label) {
       if (mounted) setState(() => _versionLabel = label);
     });

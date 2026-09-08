@@ -121,8 +121,16 @@ class PosRepository {
       'DocDueDate': today,
       'U_TINNo': customer.tin,
       'U_Rooming': customer.room,
-      'U_BookingName': customer.customerName,
-      'Reference2': customer.contact,
+      'U_BookingName': customer.clientName,
+      'Reference2': customer.wbnNo.isNotEmpty
+          ? customer.wbnNo
+          : customer.contact,
+      'agent': customer.agent,
+      'clientName': customer.clientName,
+      'wbnNo': customer.wbnNo,
+      'cashSalesNo': customer.cashSalesNo,
+      'roomNo': customer.room,
+      'tinNo': customer.tin,
       'Comments': 'MPOS mobile',
       'SessionId': _session.sessionId,
       'DeliveryNotePostingDetails': details,
@@ -184,20 +192,32 @@ class PosRepository {
             'cardName': '',
             'customerName': '',
             'tin': '',
+            'tinNo': '',
             'currency': currency,
             'room': '',
+            'roomNo': '',
             'contact': '',
             'whsCode': '',
+            'agent': '',
+            'clientName': '',
+            'wbnNo': '',
+            'cashSalesNo': '',
           }
         : {
             'cardCode': customer.cardCode,
             'cardName': customer.cardName,
             'customerName': customer.customerName,
             'tin': customer.tin,
+            'tinNo': customer.tin,
             'currency': customer.currency,
             'room': customer.room,
+            'roomNo': customer.room,
             'contact': customer.contact,
             'whsCode': customer.whsCode,
+            'agent': customer.agent,
+            'clientName': customer.clientName,
+            'wbnNo': customer.wbnNo,
+            'cashSalesNo': customer.cashSalesNo,
           };
     final payload = {
       'tableNumber': tableNumber,
@@ -222,6 +242,7 @@ class PosRepository {
                 'itemUom': line.product.itemUom,
                 'isPriceEditable': line.product.isPriceEditable,
                 'premiumDrinks': line.product.isPremiumDrink ? 'Y' : 'N',
+                'type': line.product.type,
                 // Never send null/HTML image payloads — backend JSON parser fails on "<".
                 'image': _safeImageValue(line.product.image),
               },
@@ -297,10 +318,13 @@ class PosRepository {
     });
     final list = data['responseData'];
     if (list is! List) return [];
-    return list
-        .whereType<Map<String, dynamic>>()
-        .map(DeliveryNote.fromJson)
-        .toList();
+    final notes = <DeliveryNote>[];
+    for (final row in list) {
+      final map = _asMap(row);
+      if (map == null) continue;
+      notes.add(DeliveryNote.fromJson(map));
+    }
+    return notes;
   }
 
   Future<List<PaymentMode>> fetchPaymentModes({
@@ -319,11 +343,15 @@ class PosRepository {
 
   Future<void> savePayment({
     required List<DeliveryNote> notes,
-    required PaymentMode paymentMode,
-    required double amount,
+    required List<({PaymentMode mode, double amount})> payments,
   }) async {
     if (notes.isEmpty) {
       throw ApiException('No sales selected.');
+    }
+    final validPayments =
+        payments.where((p) => p.amount > 0).toList(growable: false);
+    if (validPayments.isEmpty) {
+      throw ApiException('Enter at least one payment amount.');
     }
 
     final first = notes.first;
@@ -353,13 +381,15 @@ class PosRepository {
       'Comments': first.comments,
       'SessionId': _session.sessionId,
       'SalesInvoiceDetails': invoiceDetails,
-      'PaymentInvoice': [
-        {
-          'Branch': paymentMode.branch,
-          'PaymentMode': paymentMode.paymentMode,
-          'CashSum': amount.toStringAsFixed(2),
-        },
-      ],
+      'PaymentInvoice': validPayments
+          .map(
+            (p) => {
+              'Branch': p.mode.branch,
+              'PaymentMode': p.mode.paymentMode,
+              'CashSum': p.amount.toStringAsFixed(2),
+            },
+          )
+          .toList(),
     });
 
     if (data['statusCode'] != 0) {

@@ -19,15 +19,14 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _index = 0;
-  int _draftTabEpoch = 0;
 
   List<Widget> get _pages => [
-        const PosScreen(),
+        PosScreen(isActive: _index == 0),
         DraftListScreen(
-          key: ValueKey('draft-$_draftTabEpoch'),
+          isActive: _index == 1,
           onRestoreToPos: _goToPos,
         ),
-        const SalesListScreen(),
+        SalesListScreen(isActive: _index == 2),
       ];
 
   static const _titles = ['POS', 'Draft', 'Sales List'];
@@ -82,10 +81,7 @@ class _MainShellState extends State<MainShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (value) => setState(() {
-          _index = value;
-          if (value == 1) _draftTabEpoch++;
-        }),
+        onDestinationSelected: (value) => setState(() => _index = value),
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.point_of_sale_outlined),

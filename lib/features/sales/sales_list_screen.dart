@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../app.dart';
 import '../../core/api/api_client.dart';
@@ -11,7 +10,9 @@ import '../../models/delivery_note.dart';
 import '../../models/payment_mode.dart';
 
 class SalesListScreen extends StatefulWidget {
-  const SalesListScreen({super.key});
+  const SalesListScreen({super.key, this.isActive = true});
+
+  final bool isActive;
 
   @override
   State<SalesListScreen> createState() => _SalesListScreenState();
@@ -29,7 +30,19 @@ class _SalesListScreenState extends State<SalesListScreen> {
     super.didChangeDependencies();
     if (_didLoad) return;
     _didLoad = true;
-    _load();
+    if (widget.isActive) {
+      _load();
+    } else {
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant SalesListScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.isActive && widget.isActive) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -98,11 +111,15 @@ class _SalesListScreenState extends State<SalesListScreen> {
       return;
     }
 
+    var loaderVisible = true;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(
-        child: CircularProgressIndicator(color: AppColors.primary),
+      builder: (_) => const PopScope(
+        canPop: false,
+        child: Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
       ),
     );
 
@@ -114,14 +131,20 @@ class _SalesListScreenState extends State<SalesListScreen> {
       );
     } on ApiException catch (e) {
       if (!mounted) return;
-      Navigator.of(context).pop();
+      if (loaderVisible) {
+        Navigator.of(context).pop();
+        loaderVisible = false;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
       );
       return;
     } catch (e) {
       if (!mounted) return;
-      Navigator.of(context).pop();
+      if (loaderVisible) {
+        Navigator.of(context).pop();
+        loaderVisible = false;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(e.toString()),
@@ -132,7 +155,10 @@ class _SalesListScreenState extends State<SalesListScreen> {
     }
 
     if (!mounted) return;
-    Navigator.of(context).pop();
+    if (loaderVisible) {
+      Navigator.of(context).pop();
+      loaderVisible = false;
+    }
 
     if (modesForCustomer.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -168,10 +194,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
     }
   }
 
-  String _formatDate(DateTime? date) {
-    if (date == null) return '-';
-    return DateFormat('MMM d, yyyy').format(date);
-  }
+  String _formatDate(DeliveryNote note) => note.docDateLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -311,7 +334,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      'Date: ${_formatDate(note.docDate)}',
+                                      'Date: ${_formatDate(note)}',
                                       style: const TextStyle(
                                         fontSize: 12,
                                         color: AppColors.textSecondary,
@@ -358,23 +381,38 @@ class _PaymentSheet extends StatefulWidget {
   State<_PaymentSheet> createState() => _PaymentSheetState();
 }
 
+class _PaymentLineState {
+  _PaymentLineState({this.mode, required String initialAmount})
+      : amountController = TextEditingController(text: initialAmount);
+
+  PaymentMode? mode;
+  final TextEditingController amountController;
+
+  void dispose() => amountController.dispose();
+}
+
 class _PaymentSheetState extends State<_PaymentSheet> {
-  late PaymentMode? _mode;
-  final _amountController = TextEditingController();
+  final List<_PaymentLineState> _lines = [];
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _mode =
+    final defaultMode =
         widget.paymentModes.isNotEmpty ? widget.paymentModes.first : null;
-    // Prefill with document total so Submit is enabled immediately.
-    _amountController.text = _roundMoney(_totalPrice).toStringAsFixed(2);
+    _lines.add(
+      _PaymentLineState(
+        mode: defaultMode,
+        initialAmount: _roundMoney(_totalPrice).toStringAsFixed(2),
+      ),
+    );
   }
 
   @override
   void dispose() {
-    _amountController.dispose();
+    for (final line in _lines) {
+      line.dispose();
+    }
     super.dispose();
   }
 
@@ -395,8 +433,12 @@ class _PaymentSheetState extends State<_PaymentSheet> {
   double get _totalPrice =>
       _roundMoney(widget.notes.fold(0.0, (sum, n) => sum + n.grandTotal));
 
-  double get _payAmount =>
-      _roundMoney(double.tryParse(_amountController.text.trim()) ?? 0);
+  double _lineAmount(_PaymentLineState line) =>
+      _roundMoney(double.tryParse(line.amountController.text.trim()) ?? 0);
+
+  double get _payAmount => _roundMoney(
+        _lines.fold<double>(0, (sum, line) => sum + _lineAmount(line)),
+      );
 
   double get _balance => _roundMoney(_totalPrice - _payAmount);
 
@@ -411,33 +453,60 @@ class _PaymentSheetState extends State<_PaymentSheet> {
     );
   }
 
-  Future<void> _submit() async {
-    if (_mode == null) {
-      _showMessage('Select any payment mode.');
-      return;
-    }
-    if (_payAmount <= 0) {
-      _showMessage('Enter a valid payment amount.');
-      return;
-    }
-    if (_balance > 0) {
-      _showMessage(
-        'Payment is less than total. Balance: ${_balance.toStringAsFixed(2)}',
+  void _addPaymentLine() {
+    if (widget.paymentModes.isEmpty) return;
+    final used = _lines.map((l) => l.mode).whereType<PaymentMode>().toSet();
+    final nextMode = widget.paymentModes.firstWhere(
+      (m) => !used.contains(m),
+      orElse: () => widget.paymentModes.first,
+    );
+    final remaining = _balance > 0 ? _balance : 0.0;
+    setState(() {
+      _lines.add(
+        _PaymentLineState(
+          mode: nextMode,
+          initialAmount: remaining > 0 ? remaining.toStringAsFixed(2) : '',
+        ),
       );
+    });
+  }
+
+  void _removePaymentLine(int index) {
+    if (_lines.length <= 1) return;
+    setState(() {
+      _lines.removeAt(index).dispose();
+    });
+  }
+
+  Future<void> _submit() async {
+    final payments = <({PaymentMode mode, double amount})>[];
+    for (var i = 0; i < _lines.length; i++) {
+      final line = _lines[i];
+      final amount = _lineAmount(line);
+      if (amount <= 0) continue;
+      if (line.mode == null) {
+        _showMessage('Select payment mode for line ${i + 1}.');
+        return;
+      }
+      payments.add((mode: line.mode!, amount: amount));
+    }
+    if (payments.isEmpty) {
+      _showMessage('Enter a valid payment amount.');
       return;
     }
 
     setState(() => _saving = true);
+    final receiptLabel =
+        payments.map((p) => '${p.mode.paymentMode} ${p.amount.toStringAsFixed(2)}').join(' + ');
     final receipt = ReceiptFactory.fromDeliveryNotes(
       notes: widget.notes,
-      paymentMode: _mode!.paymentMode,
+      paymentMode: receiptLabel,
       paidAmount: _payAmount,
     );
     try {
       await AppScope.of(context).repository.savePayment(
             notes: widget.notes,
-            paymentMode: _mode!,
-            amount: _payAmount,
+            payments: payments,
           );
       if (!mounted) return;
       Navigator.pop(context, receipt);
@@ -455,9 +524,11 @@ class _PaymentSheetState extends State<_PaymentSheet> {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Padding(
+    return Material(
+      color: AppColors.surface,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
         padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottom),
         child: SizedBox(
           height: MediaQuery.of(context).size.height * 0.85,
@@ -560,28 +631,24 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    DropdownButtonFormField<PaymentMode>(
-                      // ignore: deprecated_member_use
-                      value: _mode,
-                      decoration:
-                          const InputDecoration(labelText: 'Payment Mode'),
-                      items: widget.paymentModes
-                          .map(
-                            (m) => DropdownMenuItem(
-                              value: m,
-                              child: Text(m.paymentMode),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) => setState(() => _mode = v),
+                    const Text(
+                      'Payments',
+                      style: TextStyle(fontWeight: FontWeight.w700),
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _amountController,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Amount'),
-                      onChanged: (_) => setState(() {}),
+                    const SizedBox(height: 8),
+                    for (var i = 0; i < _lines.length; i++) ...[
+                      _buildPaymentLine(i),
+                      const SizedBox(height: 10),
+                    ],
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: widget.paymentModes.isEmpty
+                            ? null
+                            : _addPaymentLine,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add payment mode'),
+                      ),
                     ),
                   ],
                 ),
@@ -621,6 +688,62 @@ class _PaymentSheetState extends State<_PaymentSheet> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildPaymentLine(int index) {
+    final line = _lines[index];
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceMuted,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Payment ${index + 1}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              if (_lines.length > 1)
+                IconButton(
+                  tooltip: 'Remove',
+                  onPressed: () => _removePaymentLine(index),
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.close, size: 20),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<PaymentMode>(
+            // ignore: deprecated_member_use
+            value: line.mode,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Payment Mode'),
+            items: widget.paymentModes
+                .map(
+                  (m) => DropdownMenuItem(
+                    value: m,
+                    child: Text(m.paymentMode, overflow: TextOverflow.ellipsis),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) => setState(() => line.mode = v),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: line.amountController,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Amount'),
+            onChanged: (_) => setState(() {}),
+          ),
+        ],
       ),
     );
   }

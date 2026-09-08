@@ -20,7 +20,7 @@ void main() {
     ConfigLoader.setForTesting(
       AppConfig(
         apiUrl: 'http://localhost/api/',
-        companyDb: 'TEST_DB',
+        companyDbs: const ['TEST_DB'],
       ),
     );
 

@@ -9,9 +9,14 @@ import '../../models/pos_draft.dart';
 import '../../models/product.dart';
 
 class DraftListScreen extends StatefulWidget {
-  const DraftListScreen({super.key, required this.onRestoreToPos});
+  const DraftListScreen({
+    super.key,
+    required this.onRestoreToPos,
+    this.isActive = true,
+  });
 
   final VoidCallback onRestoreToPos;
+  final bool isActive;
 
   @override
   State<DraftListScreen> createState() => _DraftListScreenState();
@@ -37,14 +42,32 @@ class _DraftListScreenState extends State<DraftListScreen> {
     }
     if (_didLoad) return;
     _didLoad = true;
-    _load();
-    _startAutoRefresh();
+    if (widget.isActive) {
+      _load();
+      _startAutoRefresh();
+    } else {
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant DraftListScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isActive == widget.isActive) return;
+    if (widget.isActive) {
+      _load();
+      _startAutoRefresh();
+    } else {
+      _autoRefreshTimer?.cancel();
+      _autoRefreshTimer = null;
+    }
   }
 
   void _startAutoRefresh() {
     _autoRefreshTimer?.cancel();
+    if (!widget.isActive) return;
     _autoRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      if (!mounted || _busyId != null) return;
+      if (!mounted || !widget.isActive || _busyId != null) return;
       _load(silent: true);
     });
   }
@@ -56,9 +79,13 @@ class _DraftListScreenState extends State<DraftListScreen> {
     super.dispose();
   }
 
-  void _onDraftsChanged() => _load(silent: true);
+  void _onDraftsChanged() {
+    if (!widget.isActive) return;
+    _load(silent: true);
+  }
 
   Future<void> _load({bool silent = false}) async {
+    if (!widget.isActive && silent) return;
     if (!silent) {
       setState(() => _loading = true);
     }
@@ -80,7 +107,22 @@ class _DraftListScreenState extends State<DraftListScreen> {
     }
   }
 
+  void _showDraftMessage(String message, {Color background = AppColors.error}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: background),
+    );
+  }
+
+  bool _hasValidDraftId(SavedPosDraft draft) {
+    if (draft.id.trim().isNotEmpty) return true;
+    _showDraftMessage('Draft ID is missing. Refresh and try again.');
+    return false;
+  }
+
   Future<void> _cancelDraft(SavedPosDraft draft) async {
+    if (!_hasValidDraftId(draft)) return;
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -104,19 +146,24 @@ class _DraftListScreenState extends State<DraftListScreen> {
     if (!mounted) return;
 
     setState(() => _busyId = draft.id);
-    await AppScope.of(context).posDrafts.removeDraft(draft.id);
-    if (mounted) setState(() => _busyId = null);
-    await _load();
+    try {
+      await AppScope.of(context).posDrafts.removeDraft(draft.id);
+      await _load();
+    } on Exception catch (e) {
+      _showDraftMessage(e.toString());
+    } finally {
+      if (mounted) setState(() => _busyId = null);
+    }
   }
 
   Future<void> _restoreDraft(SavedPosDraft draft) async {
+    if (!_hasValidDraftId(draft)) return;
+
     final deliveredCount = draft.lines.where((line) => line.isDelivered).length;
     if (deliveredCount == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No delivered items in this draft yet.'),
-          backgroundColor: AppColors.warning,
-        ),
+      _showDraftMessage(
+        'No delivered items in this draft yet.',
+        background: AppColors.warning,
       );
       return;
     }
@@ -127,6 +174,8 @@ class _DraftListScreenState extends State<DraftListScreen> {
   }
 
   Future<void> _markDelivered(SavedPosDraft draft) async {
+    if (!_hasValidDraftId(draft)) return;
+
     final pendingIndexes = <int>{};
     for (var i = 0; i < draft.lines.length; i++) {
       if (!draft.lines[i].isDelivered) {
@@ -142,18 +191,13 @@ class _DraftListScreenState extends State<DraftListScreen> {
         lineIndexes: pendingIndexes,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Marked as delivered'),
-          backgroundColor: AppColors.success,
-        ),
+      _showDraftMessage(
+        'Marked as delivered',
+        background: AppColors.success,
       );
       await _load();
     } on Exception catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
-      );
+      _showDraftMessage(e.toString());
     } finally {
       if (mounted) setState(() => _busyId = null);
     }

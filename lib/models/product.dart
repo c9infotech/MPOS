@@ -12,8 +12,11 @@ class Product {
     required this.itemUom,
     required this.isPriceEditable,
     required this.isPremiumDrink,
+    this.type = '',
     this.image,
   });
+
+  static const othersCategory = 'Others';
 
   final String itemCode;
   final String itemName;
@@ -28,7 +31,15 @@ class Product {
   final bool isPriceEditable;
   /// From API `premiumDrinks`: Y = chargeable locked on.
   final bool isPremiumDrink;
+  /// Product type used for POS category chips.
+  final String type;
   final String? image;
+
+  /// Category chip label: [type] when set, otherwise [othersCategory].
+  String get categoryLabel {
+    final t = type.trim();
+    return t.isEmpty ? othersCategory : t;
+  }
 
   factory Product.fromJson(Map<String, dynamic> json) {
     return Product(
@@ -44,6 +55,7 @@ class Product {
       itemUom: (json['itemUOM'] ?? json['itemUom'] ?? '').toString(),
       isPriceEditable: (json['isPriceEditable'] ?? 'N').toString() == 'Y',
       isPremiumDrink: (json['premiumDrinks'] ?? 'N').toString() == 'Y',
+      type: (json['type'] ?? json['Type'] ?? '').toString(),
       image: json['image']?.toString(),
     );
   }

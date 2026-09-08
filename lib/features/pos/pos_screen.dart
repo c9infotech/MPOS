@@ -12,7 +12,9 @@ import '../../models/product.dart';
 import '../../core/draft/pos_draft_service.dart';
 
 class PosScreen extends StatefulWidget {
-  const PosScreen({super.key});
+  const PosScreen({super.key, this.isActive = true});
+
+  final bool isActive;
 
   @override
   State<PosScreen> createState() => _PosScreenState();
@@ -50,8 +52,21 @@ class _PosScreenState extends State<PosScreen> {
     }
     if (_didLoad) return;
     _didLoad = true;
-    _load();
-    _applyPendingRestore();
+    if (widget.isActive) {
+      _load();
+      _applyPendingRestore();
+    } else {
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant PosScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.isActive && widget.isActive) {
+      _load(silent: true);
+      _applyPendingRestore();
+    }
   }
 
   @override
@@ -130,11 +145,13 @@ class _PosScreenState extends State<PosScreen> {
     });
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final repo = AppScope.of(context).repository;
       final results = await Future.wait([
@@ -146,30 +163,40 @@ class _PosScreenState extends State<PosScreen> {
         _products = results[0] as List<Product>;
         _customers = results[1] as List<Customer>;
         _loading = false;
+        _error = null;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.message;
+        if (!silent) _error = e.message;
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        if (!silent) _error = e.toString();
         _loading = false;
       });
     }
   }
 
   List<String> get _categories {
-    final units = <String>{};
+    final types = <String>{};
+    var hasOthers = false;
     for (final p in _products) {
-      final u = p.salUnitMsr.trim();
-      if (u.isNotEmpty) units.add(u);
+      final label = p.categoryLabel;
+      if (label == Product.othersCategory) {
+        hasOthers = true;
+      } else {
+        types.add(label);
+      }
     }
-    final sorted = units.toList()..sort();
-    return ['All', ...sorted];
+    final sorted = types.toList()..sort();
+    return [
+      'All',
+      ...sorted,
+      if (hasOthers) Product.othersCategory,
+    ];
   }
 
   List<Product> get _filtered {
@@ -178,7 +205,7 @@ class _PosScreenState extends State<PosScreen> {
       final matchesSearch =
           q.isEmpty || p.itemName.toLowerCase().contains(q);
       final matchesCategory = _selectedCategory == 'All' ||
-          p.salUnitMsr.trim() == _selectedCategory;
+          p.categoryLabel == _selectedCategory;
       return matchesSearch && matchesCategory;
     }).toList();
   }
@@ -290,7 +317,13 @@ class _PosScreenState extends State<PosScreen> {
                 .where(
                   (c) =>
                       c.cardName.toLowerCase().contains(query.toLowerCase()) ||
-                      c.customerName.toLowerCase().contains(query.toLowerCase()),
+                      c.customerName
+                          .toLowerCase()
+                          .contains(query.toLowerCase()) ||
+                      c.clientName
+                          .toLowerCase()
+                          .contains(query.toLowerCase()) ||
+                      c.agent.toLowerCase().contains(query.toLowerCase()),
                 )
                 .toList();
             return SizedBox(
@@ -341,97 +374,47 @@ class _PosScreenState extends State<PosScreen> {
     if (selected == null) return;
     setState(() {
       _selectedCustomer = selected.copy();
+      // Client name is guest info — never pre-fill from account cardName.
+      _selectedCustomer!.clientName = '';
+      _selectedCustomer!.customerName = '';
       _currency = selected.currency.isEmpty ? 'USD' : selected.currency;
       _repriceCart();
     });
 
-    if (_selectedCustomer!.tin.isEmpty) {
+    if (_guestInfoIncomplete(_selectedCustomer!)) {
       await _editCustomerInfo();
     }
+  }
+
+  bool _guestInfoIncomplete(Customer c) {
+    return c.agent.trim().isEmpty ||
+        c.clientName.trim().isEmpty ||
+        c.wbnNo.trim().isEmpty ||
+        c.cashSalesNo.trim().isEmpty ||
+        c.room.trim().isEmpty;
   }
 
   Future<void> _editCustomerInfo() async {
     final customer = _selectedCustomer;
     if (customer == null) return;
 
-    final nameCtrl = TextEditingController(text: customer.customerName);
-    final tinCtrl = TextEditingController(text: customer.tin);
-    final contactCtrl = TextEditingController(text: customer.contact);
-    final roomCtrl = TextEditingController(text: customer.room);
-
-    final saved = await showDialog<bool>(
+    final result = await showDialog<_CustomerInfoResult>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
-          ),
-          title: const Text('Customer Info'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Customer Name'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: tinCtrl,
-                  decoration: const InputDecoration(labelText: 'TIN Number'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: contactCtrl,
-                  decoration:
-                      const InputDecoration(labelText: 'Booking Reference'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: roomCtrl,
-                  decoration: const InputDecoration(labelText: 'Room Number'),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                nameCtrl.clear();
-                tinCtrl.clear();
-                contactCtrl.clear();
-                roomCtrl.clear();
-              },
-              child: const Text('Reset'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.emerald,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-              ),
-              child: const Text('Submit'),
-            ),
-          ],
-        );
-      },
+      barrierDismissible: false,
+      builder: (context) => _CustomerInfoDialog(customer: customer),
     );
+    if (!mounted || result == null) return;
 
-    if (saved == true) {
-      setState(() {
-        customer.customerName = nameCtrl.text.trim();
-        customer.tin = tinCtrl.text.trim();
-        customer.contact = contactCtrl.text.trim();
-        customer.room = roomCtrl.text.trim();
-      });
-    }
-
-    nameCtrl.dispose();
-    tinCtrl.dispose();
-    contactCtrl.dispose();
-    roomCtrl.dispose();
+    setState(() {
+      customer.agent = result.agent;
+      customer.clientName = result.clientName;
+      customer.wbnNo = result.wbnNo;
+      customer.cashSalesNo = result.cashSalesNo;
+      customer.room = result.room;
+      customer.tin = result.tin;
+      customer.customerName = result.clientName;
+      customer.contact = result.wbnNo;
+    });
   }
 
   Future<({int table, String subdivision})?> _pickTableSubdivision() async {
@@ -604,6 +587,18 @@ class _PosScreenState extends State<PosScreen> {
       );
       return;
     }
+    if (_guestInfoIncomplete(_selectedCustomer!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Complete customer info (Agent, Client Name, WBNo, CashSalesNo, Room No).',
+          ),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      await _editCustomerInfo();
+      if (!mounted || _guestInfoIncomplete(_selectedCustomer!)) return;
+    }
     if (_cart.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cart is empty')),
@@ -700,14 +695,6 @@ class _PosScreenState extends State<PosScreen> {
     final price = _currency == 'USD' ? product.usdPrice : product.tzsPrice;
     final symbol = _currency == 'USD' ? '\$' : 'TZS';
     return '$symbol ${price.toStringAsFixed(2)}';
-  }
-
-  String _initials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
-    return parts
-        .take(3)
-        .map((p) => p.isEmpty ? '' : p[0].toUpperCase())
-        .join();
   }
 
   Color _chipColor(int index) {
@@ -925,7 +912,7 @@ class _PosScreenState extends State<PosScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    _selectedCustomer!.customerName,
+                                    _selectedCustomer!.cardName,
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w700,
                                       color: AppColors.textPrimary,
@@ -933,14 +920,23 @@ class _PosScreenState extends State<PosScreen> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'TIN: ${_selectedCustomer!.tin}  ·  $_currency',
+                                    'Client: ${_selectedCustomer!.clientName.isEmpty ? '-' : _selectedCustomer!.clientName}'
+                                    '  ·  Agent: ${_selectedCustomer!.agent.isEmpty ? '-' : _selectedCustomer!.agent}',
                                     style: const TextStyle(
                                       fontSize: 12,
                                       color: AppColors.textSecondary,
                                     ),
                                   ),
                                   Text(
-                                    'Room: ${_selectedCustomer!.room}  ·  Ref: ${_selectedCustomer!.contact}',
+                                    'TIN: ${_selectedCustomer!.tin}  ·  Room: ${_selectedCustomer!.room}  ·  $_currency',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
+                                  Text(
+                                    'WBNo: ${_selectedCustomer!.wbnNo.isEmpty ? '-' : _selectedCustomer!.wbnNo}'
+                                    '  ·  CashSalesNo: ${_selectedCustomer!.cashSalesNo.isEmpty ? '-' : _selectedCustomer!.cashSalesNo}',
                                     style: const TextStyle(
                                       fontSize: 12,
                                       color: AppColors.textSecondary,
@@ -968,9 +964,9 @@ class _PosScreenState extends State<PosScreen> {
                     sliver: SliverGrid(
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: _productGridCrossAxisCount,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 0.78,
+                        mainAxisSpacing: 10,
+                        crossAxisSpacing: 10,
+                        mainAxisExtent: 88,
                       ),
                       delegate: SliverChildBuilderDelegate(
                         (context, index) {
@@ -978,11 +974,6 @@ class _PosScreenState extends State<PosScreen> {
                           return _ProductCard(
                             product: product,
                             priceLabel: _displayPrice(product),
-                            initials: _initials(
-                              product.itemName.isEmpty
-                                  ? product.itemCode
-                                  : product.itemName,
-                            ),
                             onTap: () => _addToCart(product),
                           );
                         },
@@ -1397,105 +1388,237 @@ class _PosScreenState extends State<PosScreen> {
   }
 }
 
+class _CustomerInfoResult {
+  const _CustomerInfoResult({
+    required this.agent,
+    required this.clientName,
+    required this.wbnNo,
+    required this.cashSalesNo,
+    required this.room,
+    required this.tin,
+  });
+
+  final String agent;
+  final String clientName;
+  final String wbnNo;
+  final String cashSalesNo;
+  final String room;
+  final String tin;
+}
+
+class _CustomerInfoDialog extends StatefulWidget {
+  const _CustomerInfoDialog({required this.customer});
+
+  final Customer customer;
+
+  @override
+  State<_CustomerInfoDialog> createState() => _CustomerInfoDialogState();
+}
+
+class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _agentCtrl;
+  late final TextEditingController _clientCtrl;
+  late final TextEditingController _wbnCtrl;
+  late final TextEditingController _cashSalesCtrl;
+  late final TextEditingController _roomCtrl;
+  late final TextEditingController _tinCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final c = widget.customer;
+    _agentCtrl = TextEditingController(text: c.agent);
+    _clientCtrl = TextEditingController(text: c.clientName);
+    _wbnCtrl = TextEditingController(
+      text: c.wbnNo.replaceAll(RegExp(r'\s+'), ''),
+    );
+    _cashSalesCtrl = TextEditingController(text: c.cashSalesNo);
+    _roomCtrl = TextEditingController(text: c.room);
+    _tinCtrl = TextEditingController(text: c.tin);
+  }
+
+  @override
+  void dispose() {
+    _agentCtrl.dispose();
+    _clientCtrl.dispose();
+    _wbnCtrl.dispose();
+    _cashSalesCtrl.dispose();
+    _roomCtrl.dispose();
+    _tinCtrl.dispose();
+    super.dispose();
+  }
+
+  String? _required(String? value, String label) {
+    if (value == null || value.trim().isEmpty) return '$label is required';
+    return null;
+  }
+
+  void _reset() {
+    _agentCtrl.clear();
+    _clientCtrl.clear();
+    _wbnCtrl.clear();
+    _cashSalesCtrl.clear();
+    _roomCtrl.clear();
+    _tinCtrl.clear();
+  }
+
+  void _submit() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    Navigator.of(context).pop(
+      _CustomerInfoResult(
+        agent: _agentCtrl.text.trim(),
+        clientName: _clientCtrl.text.trim(),
+        wbnNo: _wbnCtrl.text.replaceAll(RegExp(r'\s+'), ''),
+        cashSalesNo: _cashSalesCtrl.text.trim(),
+        room: _roomCtrl.text.trim(),
+        tin: _tinCtrl.text.trim(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      title: const Text('Customer Info'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                initialValue: widget.customer.cardName,
+                readOnly: true,
+                decoration: const InputDecoration(labelText: 'Customer Name'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _agentCtrl,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Agent *'),
+                validator: (v) => _required(v, 'Agent'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _clientCtrl,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Client Name *'),
+                validator: (v) => _required(v, 'Client Name'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _wbnCtrl,
+                textInputAction: TextInputAction.next,
+                inputFormatters: [
+                  FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'WBNo *',
+                  helperText: 'No spaces allowed',
+                ),
+                validator: (v) {
+                  final value = (v ?? '').replaceAll(RegExp(r'\s+'), '');
+                  if (value.isEmpty) return 'WBNo is required';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _cashSalesCtrl,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'CashSalesNo *'),
+                validator: (v) => _required(v, 'CashSalesNo'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _roomCtrl,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Room No *'),
+                validator: (v) => _required(v, 'Room No'),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _tinCtrl,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(
+                  labelText: 'TINNo',
+                  helperText: 'Optional',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: _reset, child: const Text('Reset')),
+        FilledButton(
+          onPressed: _submit,
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.emerald,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+          ),
+          child: const Text('Submit'),
+        ),
+      ],
+    );
+  }
+}
+
 class _ProductCard extends StatelessWidget {
   const _ProductCard({
     required this.product,
     required this.priceLabel,
-    required this.initials,
     required this.onTap,
   });
 
   final Product product;
   final String priceLabel;
-  final String initials;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Material(
       color: AppColors.surface,
-      borderRadius: BorderRadius.circular(22),
-      elevation: 2,
-      shadowColor: AppColors.primary.withValues(alpha: 0.18),
+      borderRadius: BorderRadius.circular(16),
+      elevation: 1,
+      shadowColor: AppColors.primary.withValues(alpha: 0.12),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              flex: 5,
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(22),
-                ),
-                child: ColoredBox(
-                  color: AppColors.corporateGray,
-                  child: product.image != null && product.image!.isNotEmpty
-                      ? Image.network(
-                          product.image!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) =>
-                              _InitialsAvatar(initials: initials),
-                        )
-                      : _InitialsAvatar(initials: initials),
-                ),
-              ),
-            ),
-            Expanded(
-              flex: 4,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      product.itemName.isEmpty
-                          ? product.itemCode
-                          : product.itemName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                        color: AppColors.textPrimary,
-                        height: 1.25,
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      priceLabel,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ],
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  product.itemName.isEmpty
+                      ? product.itemCode
+                      : product.itemName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: AppColors.textPrimary,
+                    height: 1.25,
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _InitialsAvatar extends StatelessWidget {
-  const _InitialsAvatar({required this.initials});
-
-  final String initials;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        initials,
-        style: const TextStyle(
-          fontSize: 28,
-          fontWeight: FontWeight.bold,
-          color: AppColors.slate700,
+              Text(
+                priceLabel,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

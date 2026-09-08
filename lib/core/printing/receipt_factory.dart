@@ -17,12 +17,16 @@ abstract final class ReceiptFactory {
       title: 'Delivery Note',
       currency: currency,
       docNo: docNo,
-      customerName: customer.customerName.isNotEmpty
-          ? customer.customerName
-          : customer.cardName,
+      customerName: customer.clientName.isNotEmpty
+          ? customer.clientName
+          : (customer.customerName.isNotEmpty
+              ? customer.customerName
+              : customer.cardName),
       room: customer.room,
       tin: customer.tin,
-      bookingReference: customer.contact,
+      bookingReference: customer.wbnNo.isNotEmpty
+          ? customer.wbnNo
+          : customer.contact,
       camp: ReceiptData.campFromCardName(customer.cardName),
       subtotal: subtotal,
       tax: tax,
