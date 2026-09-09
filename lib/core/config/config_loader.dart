@@ -11,6 +11,7 @@ class ConfigLoader {
 
   static const _assetPath = 'assets/config.json';
   static AppConfig? _config;
+  static String? _activeApiUrl;
   static ConfigLoadDiagnostics? lastDiagnostics;
 
   static Future<AppConfig> load() async {
@@ -42,6 +43,7 @@ class ConfigLoader {
 
     try {
       _config = AppConfig.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      _activeApiUrl ??= _config!.apiUrl;
       return _config!;
     } catch (e, stack) {
       throw StartupDebugException(
@@ -57,6 +59,7 @@ class ConfigLoader {
 
   static void setForTesting(AppConfig config) {
     _config = config;
+    _activeApiUrl = config.apiUrl;
   }
 
   static AppConfig get current {
@@ -67,5 +70,23 @@ class ConfigLoader {
     return config;
   }
 
-  static String get apiUrl => current.apiUrl;
+  /// Base URL used for API calls (per selected company DB).
+  static String get apiUrl {
+    final active = _activeApiUrl?.trim();
+    if (active != null && active.isNotEmpty) return active;
+    return current.apiUrl;
+  }
+
+  static void setActiveApiUrl(String url) {
+    final trimmed = url.trim();
+    _activeApiUrl = trimmed.isEmpty ? current.apiUrl : trimmed;
+  }
+
+  static void useApiUrlForCompany(String companyDb) {
+    setActiveApiUrl(current.apiUrlForCompany(companyDb));
+  }
+
+  static void resetActiveApiUrl() {
+    _activeApiUrl = current.apiUrl;
+  }
 }

@@ -61,6 +61,8 @@ class DeliveryNote {
     required this.comments,
     required this.items,
     this.docDateRaw = '',
+    this.agent = '',
+    this.wbNo = '',
   });
 
   final String docNum;
@@ -78,6 +80,8 @@ class DeliveryNote {
   final List<DeliveryNoteItem> items;
   /// Original API date string (e.g. "9/8/2026 12:00:00 AM") for display fallback.
   final String docDateRaw;
+  final String agent;
+  final String wbNo;
 
   factory DeliveryNote.fromJson(Map<String, dynamic> json) {
     final itemsRaw = json['deliveryNoteItemDetails'];
@@ -111,6 +115,10 @@ class DeliveryNote {
       comments: (json['comments'] ?? '').toString(),
       items: items,
       docDateRaw: rawDate,
+      agent: (json['u_Agent'] ?? json['u_agent'] ?? json['agent'] ?? '')
+          .toString(),
+      wbNo: (json['u_WBNO'] ?? json['u_WBNo'] ?? json['u_wbno'] ?? json['wbnNo'] ?? '')
+          .toString(),
     );
   }
 

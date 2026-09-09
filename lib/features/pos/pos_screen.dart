@@ -381,8 +381,9 @@ class _PosScreenState extends State<PosScreen> {
       _repriceCart();
     });
 
-    if (_guestInfoIncomplete(_selectedCustomer!)) {
-      await _editCustomerInfo();
+    // Draft flow: only need room number now.
+    if (_selectedCustomer!.room.trim().isEmpty) {
+      await _editCustomerInfo(mode: _CustomerInfoMode.draft);
     }
   }
 
@@ -394,26 +395,33 @@ class _PosScreenState extends State<PosScreen> {
         c.room.trim().isEmpty;
   }
 
-  Future<void> _editCustomerInfo() async {
+  Future<void> _editCustomerInfo({
+    _CustomerInfoMode mode = _CustomerInfoMode.checkout,
+  }) async {
     final customer = _selectedCustomer;
     if (customer == null) return;
 
     final result = await showDialog<_CustomerInfoResult>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _CustomerInfoDialog(customer: customer),
+      builder: (context) => _CustomerInfoDialog(
+        customer: customer,
+        mode: mode,
+      ),
     );
     if (!mounted || result == null) return;
 
     setState(() {
-      customer.agent = result.agent;
-      customer.clientName = result.clientName;
-      customer.wbnNo = result.wbnNo;
-      customer.cashSalesNo = result.cashSalesNo;
+      if (mode == _CustomerInfoMode.checkout) {
+        customer.agent = result.agent;
+        customer.clientName = result.clientName;
+        customer.wbnNo = result.wbnNo;
+        customer.cashSalesNo = result.cashSalesNo;
+        customer.tin = result.tin;
+        customer.customerName = result.clientName;
+        customer.contact = result.wbnNo;
+      }
       customer.room = result.room;
-      customer.tin = result.tin;
-      customer.customerName = result.clientName;
-      customer.contact = result.wbnNo;
     });
   }
 
@@ -539,6 +547,16 @@ class _PosScreenState extends State<PosScreen> {
       return;
     }
 
+    if (_selectedCustomer != null &&
+        _selectedCustomer!.room.trim().isEmpty) {
+      await _editCustomerInfo(mode: _CustomerInfoMode.draft);
+      if (!mounted ||
+          _selectedCustomer == null ||
+          _selectedCustomer!.room.trim().isEmpty) {
+        return;
+      }
+    }
+
     final selection = await _pickTableSubdivision();
     if (selection == null || !mounted) return;
 
@@ -591,12 +609,12 @@ class _PosScreenState extends State<PosScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Complete customer info (Agent, Client Name, WBNo, CashSalesNo, Room No).',
+            'Complete customer info before checkout.',
           ),
           backgroundColor: AppColors.error,
         ),
       );
-      await _editCustomerInfo();
+      await _editCustomerInfo(mode: _CustomerInfoMode.checkout);
       if (!mounted || _guestInfoIncomplete(_selectedCustomer!)) return;
     }
     if (_cart.isEmpty) {
@@ -877,7 +895,9 @@ class _PosScreenState extends State<PosScreen> {
                                   ),
                                   if (_selectedCustomer != null)
                                     IconButton(
-                                      onPressed: _editCustomerInfo,
+                                      onPressed: () => _editCustomerInfo(
+                                        mode: _CustomerInfoMode.draft,
+                                      ),
                                       icon: const Icon(Icons.edit_outlined,
                                           size: 20),
                                       color: AppColors.primaryDark,
@@ -1388,6 +1408,8 @@ class _PosScreenState extends State<PosScreen> {
   }
 }
 
+enum _CustomerInfoMode { draft, checkout }
+
 class _CustomerInfoResult {
   const _CustomerInfoResult({
     required this.agent,
@@ -1407,9 +1429,13 @@ class _CustomerInfoResult {
 }
 
 class _CustomerInfoDialog extends StatefulWidget {
-  const _CustomerInfoDialog({required this.customer});
+  const _CustomerInfoDialog({
+    required this.customer,
+    required this.mode,
+  });
 
   final Customer customer;
+  final _CustomerInfoMode mode;
 
   @override
   State<_CustomerInfoDialog> createState() => _CustomerInfoDialogState();
@@ -1423,6 +1449,8 @@ class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
   late final TextEditingController _cashSalesCtrl;
   late final TextEditingController _roomCtrl;
   late final TextEditingController _tinCtrl;
+
+  bool get _isCheckout => widget.mode == _CustomerInfoMode.checkout;
 
   @override
   void initState() {
@@ -1455,12 +1483,14 @@ class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
   }
 
   void _reset() {
-    _agentCtrl.clear();
-    _clientCtrl.clear();
-    _wbnCtrl.clear();
-    _cashSalesCtrl.clear();
+    if (_isCheckout) {
+      _agentCtrl.clear();
+      _clientCtrl.clear();
+      _wbnCtrl.clear();
+      _cashSalesCtrl.clear();
+      _tinCtrl.clear();
+    }
     _roomCtrl.clear();
-    _tinCtrl.clear();
   }
 
   void _submit() {
@@ -1481,7 +1511,7 @@ class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-      title: const Text('Customer Info'),
+      title: Text(_isCheckout ? 'Checkout customer info' : 'Customer Info'),
       content: SingleChildScrollView(
         child: Form(
           key: _formKey,
@@ -1495,58 +1525,63 @@ class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
               ),
               const SizedBox(height: 12),
               TextFormField(
-                controller: _agentCtrl,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(labelText: 'Agent *'),
-                validator: (v) => _required(v, 'Agent'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _clientCtrl,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(labelText: 'Client Name *'),
-                validator: (v) => _required(v, 'Client Name'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _wbnCtrl,
-                textInputAction: TextInputAction.next,
-                inputFormatters: [
-                  FilteringTextInputFormatter.deny(RegExp(r'\s')),
-                ],
-                decoration: const InputDecoration(
-                  labelText: 'WBNo *',
-                  helperText: 'No spaces allowed',
-                ),
-                validator: (v) {
-                  final value = (v ?? '').replaceAll(RegExp(r'\s+'), '');
-                  if (value.isEmpty) return 'WBNo is required';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _cashSalesCtrl,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(labelText: 'CashSalesNo *'),
-                validator: (v) => _required(v, 'CashSalesNo'),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
                 controller: _roomCtrl,
-                textInputAction: TextInputAction.next,
+                textInputAction:
+                    _isCheckout ? TextInputAction.next : TextInputAction.done,
                 decoration: const InputDecoration(labelText: 'Room No *'),
                 validator: (v) => _required(v, 'Room No'),
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _tinCtrl,
-                textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(
-                  labelText: 'TINNo',
-                  helperText: 'Optional',
+              if (_isCheckout) ...[
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _agentCtrl,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: 'Agent *'),
+                  validator: (v) => _required(v, 'Agent'),
                 ),
-              ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _clientCtrl,
+                  textInputAction: TextInputAction.next,
+                  decoration:
+                      const InputDecoration(labelText: 'Client Name *'),
+                  validator: (v) => _required(v, 'Client Name'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _wbnCtrl,
+                  textInputAction: TextInputAction.next,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: 'WBNo *',
+                    helperText: 'No spaces allowed',
+                  ),
+                  validator: (v) {
+                    final value = (v ?? '').replaceAll(RegExp(r'\s+'), '');
+                    if (value.isEmpty) return 'WBNo is required';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _cashSalesCtrl,
+                  textInputAction: TextInputAction.next,
+                  decoration:
+                      const InputDecoration(labelText: 'CashSalesNo *'),
+                  validator: (v) => _required(v, 'CashSalesNo'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _tinCtrl,
+                  textInputAction: TextInputAction.done,
+                  decoration: const InputDecoration(
+                    labelText: 'TINNo',
+                    helperText: 'Optional',
+                  ),
+                ),
+              ],
             ],
           ),
         ),

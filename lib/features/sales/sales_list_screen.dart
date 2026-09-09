@@ -10,9 +10,14 @@ import '../../models/delivery_note.dart';
 import '../../models/payment_mode.dart';
 
 class SalesListScreen extends StatefulWidget {
-  const SalesListScreen({super.key, this.isActive = true});
+  const SalesListScreen({
+    super.key,
+    this.isActive = true,
+    this.filterOpen,
+  });
 
   final bool isActive;
+  final ValueNotifier<bool>? filterOpen;
 
   @override
   State<SalesListScreen> createState() => _SalesListScreenState();
@@ -24,6 +29,42 @@ class _SalesListScreenState extends State<SalesListScreen> {
   List<DeliveryNote> _notes = [];
   final Set<String> _selectedDocNums = {};
   bool _didLoad = false;
+  bool _filterOpen = false;
+  String _activeWbFilter = '';
+  final _wbNoController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.filterOpen?.addListener(_onFilterOpenChanged);
+    _filterOpen = widget.filterOpen?.value ?? false;
+  }
+
+  @override
+  void didUpdateWidget(covariant SalesListScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.filterOpen != widget.filterOpen) {
+      oldWidget.filterOpen?.removeListener(_onFilterOpenChanged);
+      widget.filterOpen?.addListener(_onFilterOpenChanged);
+      _filterOpen = widget.filterOpen?.value ?? _filterOpen;
+    }
+    if (!oldWidget.isActive && widget.isActive) {
+      _load();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.filterOpen?.removeListener(_onFilterOpenChanged);
+    _wbNoController.dispose();
+    super.dispose();
+  }
+
+  void _onFilterOpenChanged() {
+    final open = widget.filterOpen?.value ?? false;
+    if (!mounted) return;
+    setState(() => _filterOpen = open);
+  }
 
   @override
   void didChangeDependencies() {
@@ -37,25 +78,19 @@ class _SalesListScreenState extends State<SalesListScreen> {
     }
   }
 
-  @override
-  void didUpdateWidget(covariant SalesListScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!oldWidget.isActive && widget.isActive) {
-      _load();
-    }
-  }
-
-  Future<void> _load() async {
+  Future<void> _load({String? wbNo}) async {
+    final query = (wbNo ?? _activeWbFilter).trim();
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final repo = AppScope.of(context).repository;
-      final notes = await repo.fetchDeliveryNotes();
+      final notes = await repo.fetchDeliveryNotes(wbNo: query);
       if (!mounted) return;
       setState(() {
         _notes = notes;
+        _activeWbFilter = query;
         _selectedDocNums.clear();
         _loading = false;
       });
@@ -74,8 +109,60 @@ class _SalesListScreenState extends State<SalesListScreen> {
     }
   }
 
+  Future<void> _searchByWbNo() async {
+    await _load(wbNo: _wbNoController.text);
+  }
+
+  Future<void> _clearWbFilter() async {
+    _wbNoController.clear();
+    await _load(wbNo: '');
+  }
+
   List<DeliveryNote> get _selectedNotes =>
       _notes.where((n) => _selectedDocNums.contains(n.docNum)).toList();
+
+  String? get _selectionCardCode {
+    if (_selectedDocNums.isEmpty) return null;
+    return _selectedNotes.first.cardCode;
+  }
+
+  List<DeliveryNote> get _selectableNotes {
+    if (_notes.isEmpty) return const [];
+    final code = _selectionCardCode ?? _notes.first.cardCode;
+    return _notes.where((n) => n.cardCode == code).toList(growable: false);
+  }
+
+  bool get _allSelectableSelected {
+    final selectable = _selectableNotes;
+    if (selectable.isEmpty) return false;
+    return selectable.every((n) => _selectedDocNums.contains(n.docNum));
+  }
+
+  void _toggleSelectAll() {
+    if (_notes.isEmpty) return;
+    if (_allSelectableSelected) {
+      setState(() => _selectedDocNums.clear());
+      return;
+    }
+    final selectable = _selectableNotes;
+    final skipped = _notes.length - selectable.length;
+    setState(() {
+      _selectedDocNums
+        ..clear()
+        ..addAll(selectable.map((n) => n.docNum));
+    });
+    if (skipped > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Selected ${selectable.length} from the same customer. '
+            '$skipped other customer item(s) skipped.',
+          ),
+          backgroundColor: AppColors.primaryDark,
+        ),
+      );
+    }
+  }
 
   void _toggleSelection(DeliveryNote note, bool? checked) {
     if (checked == true) {
@@ -224,6 +311,89 @@ class _SalesListScreenState extends State<SalesListScreen> {
 
     return Column(
       children: [
+        if (_filterOpen)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _wbNoController,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _searchByWbNo(),
+                    decoration: InputDecoration(
+                      labelText: 'WBno',
+                      hintText: 'Filter by WBno',
+                      isDense: true,
+                      filled: true,
+                      fillColor: AppColors.surface,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(
+                          color: AppColors.primaryDark,
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(
+                          color: AppColors.primaryDark,
+                        ),
+                      ),
+                      suffixIcon: _wbNoController.text.isNotEmpty ||
+                              _activeWbFilter.isNotEmpty
+                          ? IconButton(
+                              tooltip: 'Clear',
+                              onPressed: _clearWbFilter,
+                              icon: const Icon(Icons.clear, size: 18),
+                            )
+                          : null,
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _loading ? null : _searchByWbNo,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.emerald,
+                    foregroundColor: AppColors.textOnPrimary,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    minimumSize: const Size(0, 44),
+                  ),
+                  child: const Text('Search'),
+                ),
+                const SizedBox(width: 6),
+                OutlinedButton(
+                  onPressed: _notes.isEmpty ? null : _toggleSelectAll,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primaryDark,
+                    side: const BorderSide(color: AppColors.primaryDark),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    minimumSize: const Size(0, 44),
+                  ),
+                  child: Text(
+                    _allSelectableSelected ? 'Unselect all' : 'Select all',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (_activeWbFilter.isNotEmpty && !_filterOpen)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: InputChip(
+                label: Text('WBno: $_activeWbFilter'),
+                onDeleted: _clearWbFilter,
+              ),
+            ),
+          ),
         if (_selectedDocNums.isNotEmpty)
           Container(
             margin: const EdgeInsets.fromLTRB(12, 10, 12, 0),
@@ -256,15 +426,18 @@ class _SalesListScreenState extends State<SalesListScreen> {
         Expanded(
           child: RefreshIndicator(
             color: AppColors.primaryDark,
-            onRefresh: _load,
+            onRefresh: () => _load(),
             child: _notes.isEmpty
                 ? ListView(
-                    children: const [
-                      SizedBox(height: 120),
+                    children: [
+                      const SizedBox(height: 120),
                       Center(
                         child: Text(
-                          'No open sales found',
-                          style: TextStyle(color: AppColors.textSecondary),
+                          _activeWbFilter.isEmpty
+                              ? 'No open sales found'
+                              : 'No sales found for WBno "$_activeWbFilter"',
+                          style: const TextStyle(color: AppColors.textSecondary),
+                          textAlign: TextAlign.center,
                         ),
                       ),
                     ],
@@ -326,7 +499,7 @@ class _SalesListScreenState extends State<SalesListScreen> {
                                       ),
                                     ),
                                     Text(
-                                      'Room: ${note.rooming.isEmpty ? '-' : note.rooming}  ·  ${note.bookingName}',
+                                      'Room: ${note.rooming.isEmpty ? '-' : note.rooming}  ·  ${note.agent.isEmpty ? '-' : note.agent}',
                                       style: const TextStyle(
                                         fontSize: 13,
                                         color: AppColors.textSecondary,
@@ -335,6 +508,13 @@ class _SalesListScreenState extends State<SalesListScreen> {
                                     const SizedBox(height: 4),
                                     Text(
                                       'Date: ${_formatDate(note)}',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                    Text(
+                                      'WBno: ${note.wbNo.isEmpty ? '-' : note.wbNo}',
                                       style: const TextStyle(
                                         fontSize: 12,
                                         color: AppColors.textSecondary,
@@ -392,7 +572,10 @@ class _PaymentLineState {
 }
 
 class _PaymentSheetState extends State<_PaymentSheet> {
+  static const _chargeToOptions = ['Agent', 'Client'];
+
   final List<_PaymentLineState> _lines = [];
+  String? _chargeTo = 'Agent';
   bool _saving = false;
 
   @override
@@ -479,6 +662,10 @@ class _PaymentSheetState extends State<_PaymentSheet> {
   }
 
   Future<void> _submit() async {
+    if (_chargeTo == null || _chargeTo!.trim().isEmpty) {
+      _showMessage('Select Charge to (Agent or Client).');
+      return;
+    }
     final payments = <({PaymentMode mode, double amount})>[];
     for (var i = 0; i < _lines.length; i++) {
       final line = _lines[i];
@@ -507,6 +694,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
       await AppScope.of(context).repository.savePayment(
             notes: widget.notes,
             payments: payments,
+            chargeTo: _chargeTo!,
           );
       if (!mounted) return;
       Navigator.pop(context, receipt);
@@ -636,6 +824,49 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      // ignore: deprecated_member_use
+                      value: _chargeTo,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'Charge to',
+                        floatingLabelBehavior: FloatingLabelBehavior.always,
+                        filled: true,
+                        fillColor: AppColors.surface,
+                        contentPadding: const EdgeInsets.fromLTRB(16, 18, 12, 14),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: const BorderSide(
+                            color: AppColors.primaryDark,
+                            width: 1.2,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: const BorderSide(
+                            color: AppColors.primaryDark,
+                            width: 1.2,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: const BorderSide(
+                            color: AppColors.primaryDark,
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                      items: _chargeToOptions
+                          .map(
+                            (v) => DropdownMenuItem(
+                              value: v,
+                              child: Text(v),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) => setState(() => _chargeTo = v),
+                    ),
+                    const SizedBox(height: 10),
                     for (var i = 0; i < _lines.length; i++) ...[
                       _buildPaymentLine(i),
                       const SizedBox(height: 10),

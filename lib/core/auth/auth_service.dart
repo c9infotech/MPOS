@@ -7,11 +7,13 @@ class AuthSession {
     required this.uiJson,
     required this.database,
     required this.timestamp,
+    this.apiUrl = '',
   });
 
   final Map<String, dynamic> uiJson;
   final String database;
   final int timestamp;
+  final String apiUrl;
 
   String? get sessionId => uiJson['sessionId']?.toString();
 
@@ -44,6 +46,7 @@ class AuthService {
   static const _uiKey = 'UI';
   static const _authKey = 'authToken';
   static const _dbKey = 'db';
+  static const _apiUrlKey = 'apiUrl';
   static const _authTtlMs = 60 * 60 * 1000;
 
   bool get isAuthenticated {
@@ -66,6 +69,7 @@ class AuthService {
     if (!isAuthenticated) return null;
     final uiRaw = _prefs.getString(_uiKey);
     final db = _prefs.getString(_dbKey) ?? '';
+    final apiUrl = _prefs.getString(_apiUrlKey) ?? '';
     final authRaw = _prefs.getString(_authKey);
     if (uiRaw == null || authRaw == null) return null;
     final auth = jsonDecode(authRaw) as Map<String, dynamic>;
@@ -73,15 +77,22 @@ class AuthService {
       uiJson: jsonDecode(uiRaw) as Map<String, dynamic>,
       database: db,
       timestamp: auth['timestamp'] as int? ?? 0,
+      apiUrl: apiUrl,
     );
   }
 
   Future<void> saveSession({
     required Map<String, dynamic> ui,
     required String database,
+    String? apiUrl,
   }) async {
     await _prefs.setString(_uiKey, jsonEncode(ui));
     await _prefs.setString(_dbKey, database);
+    if (apiUrl != null && apiUrl.trim().isNotEmpty) {
+      await _prefs.setString(_apiUrlKey, apiUrl.trim());
+    } else {
+      await _prefs.remove(_apiUrlKey);
+    }
     await _prefs.setString(
       _authKey,
       jsonEncode({
@@ -95,5 +106,6 @@ class AuthService {
     await _prefs.remove(_uiKey);
     await _prefs.remove(_authKey);
     await _prefs.remove(_dbKey);
+    await _prefs.remove(_apiUrlKey);
   }
 }

@@ -33,6 +33,10 @@ class PosRepository {
         ? ConfigLoader.current.companyDb
         : companyDb.trim();
 
+    // Route login (and the rest of the session) to this company's base URL.
+    ConfigLoader.useApiUrlForCompany(db);
+    final apiUrl = ConfigLoader.apiUrl;
+
     // Exact Vue payload shape (UserLogin.vue login()).
     final param = <String, dynamic>{
       'UserName': username,
@@ -61,7 +65,11 @@ class PosRepository {
       );
     }
 
-    await _auth.saveSession(ui: responseData, database: db);
+    await _auth.saveSession(
+      ui: responseData,
+      database: db,
+      apiUrl: apiUrl,
+    );
   }
 
   Future<List<Customer>> fetchCustomers() async {
@@ -311,11 +319,17 @@ class PosRepository {
     }
   }
 
-  Future<List<DeliveryNote>> fetchDeliveryNotes() async {
-    final data = await _api.post('DeliveryNoteDetails', {
+  Future<List<DeliveryNote>> fetchDeliveryNotes({String? wbNo}) async {
+    final body = <String, dynamic>{
       'UserCode': _session.userCode,
       'Index': 1,
-    });
+    };
+    final wb = wbNo?.trim() ?? '';
+    if (wb.isNotEmpty) {
+      body['u_WBNO'] = wb;
+      body['WBno'] = wb;
+    }
+    final data = await _api.post('DeliveryNoteDetails', body);
     final list = data['responseData'];
     if (list is! List) return [];
     final notes = <DeliveryNote>[];
@@ -324,7 +338,11 @@ class PosRepository {
       if (map == null) continue;
       notes.add(DeliveryNote.fromJson(map));
     }
-    return notes;
+    if (wb.isEmpty) return notes;
+    final needle = wb.toLowerCase();
+    return notes
+        .where((n) => n.wbNo.toLowerCase().contains(needle))
+        .toList(growable: false);
   }
 
   Future<List<PaymentMode>> fetchPaymentModes({
@@ -344,6 +362,7 @@ class PosRepository {
   Future<void> savePayment({
     required List<DeliveryNote> notes,
     required List<({PaymentMode mode, double amount})> payments,
+    required String chargeTo,
   }) async {
     if (notes.isEmpty) {
       throw ApiException('No sales selected.');
@@ -352,6 +371,10 @@ class PosRepository {
         payments.where((p) => p.amount > 0).toList(growable: false);
     if (validPayments.isEmpty) {
       throw ApiException('Enter at least one payment amount.');
+    }
+    final charge = chargeTo.trim();
+    if (charge.isEmpty) {
+      throw ApiException('Select Charge to (Agent or Client).');
     }
 
     final first = notes.first;
@@ -380,6 +403,7 @@ class PosRepository {
       'TrackingNumber': first.trackingNumber,
       'Comments': first.comments,
       'SessionId': _session.sessionId,
+      'u_chargeto': charge,
       'SalesInvoiceDetails': invoiceDetails,
       'PaymentInvoice': validPayments
           .map(

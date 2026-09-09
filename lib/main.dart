@@ -30,6 +30,12 @@ Future<void> main() async {
       loadSharedPreferencesSafely,
     );
     final auth = AuthService(prefs);
+    final session = auth.session;
+    if (session != null && session.apiUrl.isNotEmpty) {
+      ConfigLoader.setActiveApiUrl(session.apiUrl);
+    } else if (session != null && session.database.isNotEmpty) {
+      ConfigLoader.useApiUrlForCompany(session.database);
+    }
     final repository = PosRepository(ApiClient(), auth);
     final posDrafts = PosDraftService(repository);
     runApp(MposApp(

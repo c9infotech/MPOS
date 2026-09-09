@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
+import '../../core/config/config_loader.dart';
 import '../../core/theme/app_colors.dart';
 import '../login/login_screen.dart';
 import '../pos/pos_screen.dart';
@@ -19,6 +20,7 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _index = 0;
+  final ValueNotifier<bool> _salesFilterOpen = ValueNotifier(false);
 
   List<Widget> get _pages => [
         PosScreen(isActive: _index == 0),
@@ -26,15 +28,25 @@ class _MainShellState extends State<MainShell> {
           isActive: _index == 1,
           onRestoreToPos: _goToPos,
         ),
-        SalesListScreen(isActive: _index == 2),
+        SalesListScreen(
+          isActive: _index == 2,
+          filterOpen: _salesFilterOpen,
+        ),
       ];
 
   static const _titles = ['POS', 'Draft', 'Sales List'];
 
   void _goToPos() => setState(() => _index = 0);
 
+  @override
+  void dispose() {
+    _salesFilterOpen.dispose();
+    super.dispose();
+  }
+
   Future<void> _logout() async {
     await AppScope.of(context).auth.clearSession();
+    ConfigLoader.resetActiveApiUrl();
     if (!mounted) return;
     Navigator.of(context).pushNamedAndRemoveUntil(
       LoginScreen.routeName,
@@ -51,6 +63,19 @@ class _MainShellState extends State<MainShell> {
         foregroundColor: AppColors.textOnPrimary,
         title: Text('MPOS - ${_titles[_index]}'),
         actions: [
+          if (_index == 2)
+            ValueListenableBuilder<bool>(
+              valueListenable: _salesFilterOpen,
+              builder: (context, open, _) {
+                return IconButton(
+                  tooltip: open ? 'Hide WBno filter' : 'Filter by WBno',
+                  onPressed: () => _salesFilterOpen.value = !open,
+                  icon: Icon(
+                    open ? Icons.filter_alt : Icons.filter_alt_outlined,
+                  ),
+                );
+              },
+            ),
           IconButton(
             tooltip: 'Bluetooth printer',
             onPressed: () {
@@ -81,7 +106,12 @@ class _MainShellState extends State<MainShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (value) => setState(() => _index = value),
+        onDestinationSelected: (value) {
+          setState(() => _index = value);
+          if (value != 2) {
+            _salesFilterOpen.value = false;
+          }
+        },
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.point_of_sale_outlined),

@@ -1,8 +1,17 @@
 {
   "apiUrl": "http://196.61.9.142:8588/api/",
   "companydb": [
-    "KARIBU_CAMPS",
-    "KARIBU_CAMPS_TEST",
-    "TEST DB"
+    {
+      "name": "KARIBU_CAMPS",
+      "apiUrl": "http://196.61.9.142:8588/api/"
+    },
+    {
+      "name": "KARIBU_CAMPS_TEST",
+      "apiUrl": "http://196.61.9.142:8588/api/"
+    },
+    {
+      "name": "TEST DB",
+      "apiUrl": "http://192.168.1.94:8589/api/"
+    }
   ]
 }
