@@ -9,6 +9,7 @@ import '../../core/printing/receipt_factory.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/customer.dart';
 import '../../models/product.dart';
+import '../../models/branch_option.dart';
 import '../../core/draft/pos_draft_service.dart';
 
 class PosScreen extends StatefulWidget {
@@ -381,8 +382,9 @@ class _PosScreenState extends State<PosScreen> {
       _repriceCart();
     });
 
-    // Draft flow: only need room number now.
-    if (_selectedCustomer!.room.trim().isEmpty) {
+    // Draft flow: need room number + waiter.
+    if (_selectedCustomer!.room.trim().isEmpty ||
+        _selectedCustomer!.waiter.trim().isEmpty) {
       await _editCustomerInfo(mode: _CustomerInfoMode.draft);
     }
   }
@@ -422,6 +424,7 @@ class _PosScreenState extends State<PosScreen> {
         customer.contact = result.wbnNo;
       }
       customer.room = result.room;
+      customer.waiter = result.waiter;
     });
   }
 
@@ -446,7 +449,7 @@ class _PosScreenState extends State<PosScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text(
-                      'Save draft — select table & subdivision',
+                      'Save draft — select room & subdivision',
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 16,
@@ -455,7 +458,7 @@ class _PosScreenState extends State<PosScreen> {
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Table',
+                      'Room',
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
                         color: AppColors.textSecondary,
@@ -527,7 +530,7 @@ class _PosScreenState extends State<PosScreen> {
                         backgroundColor: AppColors.emerald,
                         minimumSize: const Size.fromHeight(48),
                       ),
-                      child: Text('Save to Table $table · $subdivision'),
+                      child: Text('Save to Room $table · $subdivision'),
                     ),
                   ],
                 ),
@@ -580,7 +583,7 @@ class _PosScreenState extends State<PosScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Draft saved for Table ${selection.table} · ${selection.subdivision}',
+            'Draft saved for Room ${selection.table} · ${selection.subdivision}',
           ),
           backgroundColor: AppColors.success,
         ),
@@ -1418,6 +1421,7 @@ class _CustomerInfoResult {
     required this.cashSalesNo,
     required this.room,
     required this.tin,
+    required this.waiter,
   });
 
   final String agent;
@@ -1426,6 +1430,7 @@ class _CustomerInfoResult {
   final String cashSalesNo;
   final String room;
   final String tin;
+  final String waiter;
 }
 
 class _CustomerInfoDialog extends StatefulWidget {
@@ -1450,6 +1455,11 @@ class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
   late final TextEditingController _roomCtrl;
   late final TextEditingController _tinCtrl;
 
+  List<BranchOption> _waiters = [];
+  BranchOption? _selectedWaiter;
+  bool _loadingWaiters = true;
+  String? _waiterError;
+
   bool get _isCheckout => widget.mode == _CustomerInfoMode.checkout;
 
   @override
@@ -1458,12 +1468,56 @@ class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
     final c = widget.customer;
     _agentCtrl = TextEditingController(text: c.agent);
     _clientCtrl = TextEditingController(text: c.clientName);
-    _wbnCtrl = TextEditingController(
-      text: c.wbnNo.replaceAll(RegExp(r'\s+'), ''),
-    );
-    _cashSalesCtrl = TextEditingController(text: c.cashSalesNo);
+    // Always start blank — do not reuse previously entered / stored values.
+    _wbnCtrl = TextEditingController();
+    _cashSalesCtrl = TextEditingController();
     _roomCtrl = TextEditingController(text: c.room);
     _tinCtrl = TextEditingController(text: c.tin);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadWaiters());
+  }
+
+  Future<void> _loadWaiters() async {
+    setState(() {
+      _loadingWaiters = true;
+      _waiterError = null;
+    });
+    try {
+      final repo = AppScope.of(context).repository;
+      final list = await repo.fetchBranchList();
+      if (!mounted) return;
+      BranchOption? selected;
+      final current = widget.customer.waiter.trim();
+      if (current.isNotEmpty) {
+        for (final w in list) {
+          if (w.code == current || w.name == current || w.label == current) {
+            selected = w;
+            break;
+          }
+        }
+      }
+      // Single option from BranchList (e.g. { name: "TEST2" }) — preselect it.
+      selected ??= list.length == 1 ? list.first : null;
+      setState(() {
+        _waiters = list;
+        _selectedWaiter = selected;
+        _loadingWaiters = false;
+        if (list.isEmpty) {
+          _waiterError = 'No waiters found for this user.';
+        }
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingWaiters = false;
+        _waiterError = e.message;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingWaiters = false;
+        _waiterError = e.toString();
+      });
+    }
   }
 
   @override
@@ -1491,10 +1545,15 @@ class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
       _tinCtrl.clear();
     }
     _roomCtrl.clear();
+    setState(() => _selectedWaiter = null);
   }
 
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_selectedWaiter == null) {
+      setState(() => _waiterError = 'Waiter is required');
+      return;
+    }
     Navigator.of(context).pop(
       _CustomerInfoResult(
         agent: _agentCtrl.text.trim(),
@@ -1503,6 +1562,7 @@ class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
         cashSalesNo: _cashSalesCtrl.text.trim(),
         room: _roomCtrl.text.trim(),
         tin: _tinCtrl.text.trim(),
+        waiter: _selectedWaiter!.label,
       ),
     );
   }
@@ -1511,7 +1571,21 @@ class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-      title: Text(_isCheckout ? 'Checkout customer info' : 'Customer Info'),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              _isCheckout ? 'Checkout customer info' : 'Customer Info',
+            ),
+          ),
+          IconButton(
+            tooltip: 'Close',
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
       content: SingleChildScrollView(
         child: Form(
           key: _formKey,
@@ -1526,11 +1600,51 @@ class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
               const SizedBox(height: 12),
               TextFormField(
                 controller: _roomCtrl,
-                textInputAction:
-                    _isCheckout ? TextInputAction.next : TextInputAction.done,
+                textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(labelText: 'Room No *'),
                 validator: (v) => _required(v, 'Room No'),
               ),
+              const SizedBox(height: 12),
+              if (_loadingWaiters)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                )
+              else
+                DropdownButtonFormField<BranchOption>(
+                  // ignore: deprecated_member_use
+                  value: _selectedWaiter,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: 'Waiter *',
+                    errorText: _waiterError,
+                  ),
+                  items: _waiters
+                      .map(
+                        (w) => DropdownMenuItem(
+                          value: w,
+                          child: Text(
+                            w.label,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _waiters.isEmpty
+                      ? null
+                      : (v) => setState(() {
+                            _selectedWaiter = v;
+                            _waiterError = null;
+                          }),
+                  validator: (v) =>
+                      v == null ? 'Waiter is required' : null,
+                ),
               if (_isCheckout) ...[
                 const SizedBox(height: 12),
                 TextFormField(
@@ -1589,7 +1703,7 @@ class _CustomerInfoDialogState extends State<_CustomerInfoDialog> {
       actions: [
         TextButton(onPressed: _reset, child: const Text('Reset')),
         FilledButton(
-          onPressed: _submit,
+          onPressed: _loadingWaiters ? null : _submit,
           style: FilledButton.styleFrom(
             backgroundColor: AppColors.emerald,
             shape: RoundedRectangleBorder(

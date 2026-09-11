@@ -12,7 +12,7 @@ class PosDraftSlot {
   final int tableNumber;
   final String subdivision;
 
-  String get label => 'Table $tableNumber · $subdivision';
+  String get label => 'Room $tableNumber · $subdivision';
 
   Map<String, dynamic> toJson() => {
         'tableNumber': tableNumber,
@@ -33,6 +33,7 @@ class SavedPosDraft {
     required this.currency,
     required this.savedAt,
     this.customer,
+    this.branchEmpName = '',
   });
 
   final String id;
@@ -41,6 +42,18 @@ class SavedPosDraft {
   final String currency;
   final DateTime savedAt;
   final Customer? customer;
+  /// Waiter / branch employee from GetDraft `BranchEmpName`.
+  final String branchEmpName;
+
+  /// e.g. `Room 2 · B (Thomas)`
+  String get displayLabel {
+    final base = slot.label;
+    final name = branchEmpName.trim().isNotEmpty
+        ? branchEmpName.trim()
+        : (customer?.waiter.trim() ?? '');
+    if (name.isEmpty) return base;
+    return '$base ($name)';
+  }
 
   int get itemCount => lines.fold<int>(0, (s, l) => s + l.qty);
 
@@ -55,6 +68,9 @@ class SavedPosDraft {
         'lines': lines.map(_cartLineToJson).toList(),
         'currency': currency,
         'savedAt': savedAt.toIso8601String(),
+        'BranchEmpName': branchEmpName.isNotEmpty
+            ? branchEmpName
+            : (customer?.waiter ?? ''),
         'customer': customer == null
             ? null
             : {
@@ -72,6 +88,7 @@ class SavedPosDraft {
                 'clientName': customer!.clientName,
                 'wbnNo': customer!.wbnNo,
                 'cashSalesNo': customer!.cashSalesNo,
+                'BranchEmpName': customer!.waiter,
               },
       };
 
@@ -80,6 +97,8 @@ class SavedPosDraft {
     final customerJson = json['customer'];
     if (customerJson is Map<String, dynamic>) {
       customer = Customer.fromJson(customerJson);
+    } else if (customerJson is Map) {
+      customer = Customer.fromJson(Map<String, dynamic>.from(customerJson));
     }
     final slotJson = json['slot'];
     final slot = slotJson is Map<String, dynamic>
@@ -88,16 +107,28 @@ class SavedPosDraft {
             tableNumber: (json['tableNumber'] as num?)?.toInt() ?? 0,
             subdivision: (json['subdivision'] ?? '').toString(),
           );
+    final branchEmp = (json['BranchEmpName'] ??
+            json['branchEmpName'] ??
+            customer?.waiter ??
+            '')
+        .toString()
+        .trim();
+    if (customer != null &&
+        customer.waiter.trim().isEmpty &&
+        branchEmp.isNotEmpty) {
+      customer.waiter = branchEmp;
+    }
     return SavedPosDraft(
       id: (json['id'] ?? json['draftId'] ?? '').toString(),
       slot: slot,
       lines: (json['lines'] as List)
-          .map((e) => _cartLineFromJson(e as Map<String, dynamic>))
+          .map((e) => _cartLineFromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
       currency: json['currency'] as String? ?? 'USD',
       savedAt: DateTime.tryParse((json['savedAt'] ?? '').toString()) ??
           DateTime.now(),
       customer: customer,
+      branchEmpName: branchEmp,
     );
   }
 }

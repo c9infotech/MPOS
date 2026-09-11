@@ -63,6 +63,7 @@ class DeliveryNote {
     this.docDateRaw = '',
     this.agent = '',
     this.wbNo = '',
+    this.waiter = '',
   });
 
   final String docNum;
@@ -82,6 +83,7 @@ class DeliveryNote {
   final String docDateRaw;
   final String agent;
   final String wbNo;
+  final String waiter;
 
   factory DeliveryNote.fromJson(Map<String, dynamic> json) {
     final itemsRaw = json['deliveryNoteItemDetails'];
@@ -118,6 +120,13 @@ class DeliveryNote {
       agent: (json['u_Agent'] ?? json['u_agent'] ?? json['agent'] ?? '')
           .toString(),
       wbNo: (json['u_WBNO'] ?? json['u_WBNo'] ?? json['u_wbno'] ?? json['wbnNo'] ?? '')
+          .toString(),
+      waiter: (json['BranchEmpName'] ??
+              json['branchEmpName'] ??
+              json['u_Waiter'] ??
+              json['waiter'] ??
+              json['Waiter'] ??
+              '')
           .toString(),
     );
   }

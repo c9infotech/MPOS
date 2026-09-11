@@ -13,6 +13,7 @@ abstract final class ReceiptFactory {
     required double total,
     String docNo = '',
   }) {
+    final wbNo = customer.wbnNo.isNotEmpty ? customer.wbnNo : customer.contact;
     return ReceiptData(
       title: 'Delivery Note',
       currency: currency,
@@ -22,11 +23,13 @@ abstract final class ReceiptFactory {
           : (customer.customerName.isNotEmpty
               ? customer.customerName
               : customer.cardName),
+      clientName: customer.clientName,
+      agent: customer.agent,
+      wbNo: wbNo,
+      waiter: customer.waiter,
       room: customer.room,
       tin: customer.tin,
-      bookingReference: customer.wbnNo.isNotEmpty
-          ? customer.wbnNo
-          : customer.contact,
+      bookingReference: wbNo,
       camp: ReceiptData.campFromCardName(customer.cardName),
       subtotal: subtotal,
       tax: tax,
@@ -67,15 +70,32 @@ abstract final class ReceiptFactory {
     final subtotal = notes.fold<double>(0, (s, n) => s + n.lineTotal);
     final tax = notes.fold<double>(0, (s, n) => s + n.taxTotal);
     final total = notes.fold<double>(0, (s, n) => s + n.grandTotal);
-    final docNos = notes.map((n) => n.docNum).where((d) => d.isNotEmpty).join(', ');
+    final orderNumbers = notes
+        .map((n) => n.docNum.trim())
+        .where((d) => d.isNotEmpty)
+        .toList(growable: false);
+
+    // Prefer first non-empty values across bulk-selected notes.
+    String firstNonEmpty(String Function(DeliveryNote n) pick) {
+      for (final n in notes) {
+        final v = pick(n).trim();
+        if (v.isNotEmpty) return v;
+      }
+      return '';
+    }
 
     return ReceiptData(
       title: 'Sales Receipt',
       currency: first.docCurrency,
-      docNo: docNos,
+      docNo: '',
+      orderNumbers: orderNumbers,
       customerName: first.bookingName.isNotEmpty
           ? first.bookingName
           : first.cardName,
+      clientName: firstNonEmpty((n) => n.bookingName),
+      agent: firstNonEmpty((n) => n.agent),
+      wbNo: firstNonEmpty((n) => n.wbNo),
+      waiter: firstNonEmpty((n) => n.waiter),
       room: first.rooming,
       tin: first.tinNo,
       bookingReference: first.trackingNumber,

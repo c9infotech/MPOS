@@ -86,18 +86,29 @@ class ReceiptBuilder {
     if (receipt.docNo.isNotEmpty) {
       bytes.addAll(generator.text(_safe('Doc No: ${receipt.docNo}')));
     }
-    if (receipt.customerName.isNotEmpty) {
-      bytes.addAll(generator.text(_clip(receipt.customerName, maxChars)));
+    if (receipt.agent.trim().isNotEmpty) {
+      bytes.addAll(generator.text(_safe('Agent: ${receipt.agent.trim()}')));
+    }
+    final clientName = receipt.clientName.trim().isNotEmpty
+        ? receipt.clientName.trim()
+        : receipt.customerName.trim();
+    if (clientName.isNotEmpty) {
+      bytes.addAll(
+        generator.text(_clip('Client Name: $clientName', maxChars)),
+      );
+    }
+    if (receipt.wbNo.trim().isNotEmpty) {
+      bytes.addAll(generator.text(_safe('WBNo: ${receipt.wbNo.trim()}')));
+    } else if (receipt.bookingReference.trim().isNotEmpty) {
+      // Legacy / cart receipts that still use bookingReference as WBNo.
+      bytes.addAll(
+        generator.text(
+          _safe('WBNo: ${receipt.bookingReference.trim()}'),
+        ),
+      );
     }
     if (receipt.tin.trim().isNotEmpty) {
       bytes.addAll(generator.text(_safe('TIN No: ${receipt.tin.trim()}')));
-    }
-    if (receipt.bookingReference.trim().isNotEmpty) {
-      bytes.addAll(
-        generator.text(
-          _safe('Booking Ref: ${receipt.bookingReference.trim()}'),
-        ),
-      );
     }
     if (receipt.room.trim().isNotEmpty) {
       bytes.addAll(generator.text(_safe('Room No: ${receipt.room.trim()}')));
@@ -220,6 +231,33 @@ class ReceiptBuilder {
             'Paid: ${receipt.currency} ${money.format(receipt.paidAmount)}',
           ),
         ),
+      );
+    }
+
+    final orderNumbers = receipt.orderNumbers
+        .map((n) => n.trim())
+        .where((n) => n.isNotEmpty)
+        .toList(growable: false);
+    if (orderNumbers.isNotEmpty) {
+      bytes.addAll(generator.hr());
+      bytes.addAll(
+        generator.text(
+          _safe("Order Number's:"),
+          styles: const PosStyles(bold: true),
+        ),
+      );
+      // Print each doc number on its own line for bulk payments.
+      for (final orderNo in orderNumbers) {
+        bytes.addAll(generator.text(_safe(orderNo)));
+      }
+    }
+
+    if (receipt.waiter.trim().isNotEmpty) {
+      if (orderNumbers.isEmpty) {
+        bytes.addAll(generator.hr());
+      }
+      bytes.addAll(
+        generator.text(_safe('Waiter: ${receipt.waiter.trim()}')),
       );
     }
 

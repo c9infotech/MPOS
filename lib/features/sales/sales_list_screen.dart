@@ -573,6 +573,7 @@ class _PaymentLineState {
 
 class _PaymentSheetState extends State<_PaymentSheet> {
   static const _chargeToOptions = ['Agent', 'Client'];
+  static const _maxPaymentModes = 2;
 
   final List<_PaymentLineState> _lines = [];
   String? _chargeTo = 'Agent';
@@ -638,6 +639,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
 
   void _addPaymentLine() {
     if (widget.paymentModes.isEmpty) return;
+    if (_lines.length >= _maxPaymentModes) return;
     final used = _lines.map((l) => l.mode).whereType<PaymentMode>().toSet();
     final nextMode = widget.paymentModes.firstWhere(
       (m) => !used.contains(m),
@@ -874,11 +876,16 @@ class _PaymentSheetState extends State<_PaymentSheet> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
-                        onPressed: widget.paymentModes.isEmpty
+                        onPressed: widget.paymentModes.isEmpty ||
+                                _lines.length >= _maxPaymentModes
                             ? null
                             : _addPaymentLine,
                         icon: const Icon(Icons.add),
-                        label: const Text('Add payment mode'),
+                        label: Text(
+                          _lines.length >= _maxPaymentModes
+                              ? 'Max 2 payment modes'
+                              : 'Add payment mode',
+                        ),
                       ),
                     ),
                   ],

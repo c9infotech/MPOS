@@ -8,6 +8,7 @@ import '../../models/delivery_note.dart';
 import '../../models/payment_mode.dart';
 import '../../models/pos_draft.dart';
 import '../../models/product.dart';
+import '../../models/branch_option.dart';
 
 class PosRepository {
   PosRepository(this._api, this._auth);
@@ -137,6 +138,7 @@ class PosRepository {
       'clientName': customer.clientName,
       'wbnNo': customer.wbnNo,
       'cashSalesNo': customer.cashSalesNo,
+      'BranchEmpName': customer.waiter,
       'roomNo': customer.room,
       'tinNo': customer.tin,
       'Comments': 'MPOS mobile',
@@ -210,6 +212,7 @@ class PosRepository {
             'clientName': '',
             'wbnNo': '',
             'cashSalesNo': '',
+            'BranchEmpName': '',
           }
         : {
             'cardCode': customer.cardCode,
@@ -226,11 +229,13 @@ class PosRepository {
             'clientName': customer.clientName,
             'wbnNo': customer.wbnNo,
             'cashSalesNo': customer.cashSalesNo,
+            'BranchEmpName': customer.waiter,
           };
     final payload = {
       'tableNumber': tableNumber,
       'subdivision': subdivision,
       'currency': currency,
+      'UserId': _session.userCode,
       'customer': payloadCustomer,
       'lines': lines
           .map(
@@ -273,7 +278,10 @@ class PosRepository {
   }
 
   Future<List<SavedPosDraft>> fetchDrafts({String draftId = ''}) async {
-    final data = await _api.post('GetDraft', {'DraftID': draftId});
+    final data = await _api.post('GetDraft', {
+      'DraftID': draftId,
+      'UserId': _session.userCode,
+    });
     if (!_isSuccessStatus(data['statusCode'])) {
       throw ApiException(ApiClient.extractError(data));
     }
@@ -295,6 +303,22 @@ class PosRepository {
               .map(_draftLine)
               .toList()
           : <CartLine>[];
+      final customerMap = _asMap(row['customer']);
+      Customer? customer =
+          customerMap == null ? null : Customer.fromJson(customerMap);
+      final branchEmp = (row['BranchEmpName'] ??
+              row['branchEmpName'] ??
+              customerMap?['BranchEmpName'] ??
+              customerMap?['branchEmpName'] ??
+              customer?.waiter ??
+              '')
+          .toString()
+          .trim();
+      if (customer != null &&
+          customer.waiter.trim().isEmpty &&
+          branchEmp.isNotEmpty) {
+        customer.waiter = branchEmp;
+      }
       parsed.add(SavedPosDraft(
         id: (row['draftId'] ?? row['id'] ?? '').toString(),
         slot: PosDraftSlot(
@@ -304,9 +328,8 @@ class PosRepository {
         lines: lineList,
         currency: (row['currency'] ?? 'USD').toString(),
         savedAt: now,
-        customer: _asMap(row['customer']) == null
-            ? null
-            : Customer.fromJson(_asMap(row['customer'])!),
+        customer: customer,
+        branchEmpName: branchEmp,
       ));
     }
     return parsed;
@@ -357,6 +380,50 @@ class PosRepository {
         .whereType<Map<String, dynamic>>()
         .map(PaymentMode.fromJson)
         .toList();
+  }
+
+  /// Waiter / branch options for the logged-in user (`Branch` = userCode).
+  /// API may return either a single `{ "name": "TEST2" }` or a list.
+  Future<List<BranchOption>> fetchBranchList() async {
+    final branch = _session.userCode.trim();
+    if (branch.isEmpty) {
+      throw ApiException('User code missing. Please login again.');
+    }
+    final data = await _api.post('BranchList', {
+      'Branch': branch,
+    });
+    if (data['statusCode'] == 2 || data['statusCode'] == '2') {
+      throw ApiException(ApiClient.extractError(data));
+    }
+
+    final raw = data['responseData'] ?? data['ResponseData'] ?? data['data'];
+    final options = <BranchOption>[];
+
+    void addRow(dynamic row) {
+      if (row is String) {
+        final value = row.trim();
+        if (value.isEmpty) return;
+        options.add(BranchOption(code: value, name: value));
+        return;
+      }
+      final map = _asMap(row);
+      if (map == null) return;
+      final option = BranchOption.fromJson(map);
+      if (option.code.isEmpty && option.name.isEmpty) return;
+      options.add(option);
+    }
+
+    if (raw is List) {
+      for (final row in raw) {
+        addRow(row);
+      }
+    } else if (raw is Map) {
+      addRow(raw);
+    } else if (raw is String && raw.trim().isNotEmpty) {
+      addRow(raw.trim());
+    }
+
+    return options;
   }
 
   Future<void> savePayment({

@@ -128,7 +128,7 @@ class _DraftListScreenState extends State<DraftListScreen> {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         title: const Text('Cancel draft?'),
-        content: Text('Remove ${draft.slot.label} from drafts?'),
+        content: Text('Remove ${draft.displayLabel} from drafts?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -243,7 +243,7 @@ class _DraftListScreenState extends State<DraftListScreen> {
               const SizedBox(height: 6),
               Text(
                 _error == null
-                    ? 'On POS, add items to cart → Save Draft → pick table & subdivision.'
+                    ? 'On POS, add items to cart → Save Draft → pick room & subdivision.'
                     : _error!,
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: AppColors.textSecondary),
@@ -274,7 +274,7 @@ class _DraftListScreenState extends State<DraftListScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    draft.slot.label,
+                    draft.displayLabel,
                     style: const TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 16,

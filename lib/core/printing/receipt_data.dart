@@ -25,7 +25,12 @@ class ReceiptData {
     required this.tax,
     required this.total,
     this.docNo = '',
+    this.orderNumbers = const [],
     this.customerName = '',
+    this.clientName = '',
+    this.agent = '',
+    this.wbNo = '',
+    this.waiter = '',
     this.room = '',
     this.tin = '',
     this.bookingReference = '',
@@ -43,7 +48,17 @@ class ReceiptData {
   final double tax;
   final double total;
   final String docNo;
+  /// Delivery / sales doc numbers shown at the bottom as Order Number's.
+  final List<String> orderNumbers;
   final String customerName;
+  /// From `U_BookingName`.
+  final String clientName;
+  /// From `u_Agent` / Agent.
+  final String agent;
+  /// From `u_WBNO` / wbnNo.
+  final String wbNo;
+  /// From `BranchEmpName` / Waiter.
+  final String waiter;
   final String room;
   final String tin;
   final String bookingReference;

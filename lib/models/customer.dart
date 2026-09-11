@@ -12,6 +12,7 @@ class Customer {
     this.clientName = '',
     this.wbnNo = '',
     this.cashSalesNo = '',
+    this.waiter = '',
   });
 
   final String cardCode;
@@ -28,6 +29,7 @@ class Customer {
   String clientName;
   String wbnNo;
   String cashSalesNo;
+  String waiter;
 
   factory Customer.fromJson(Map<String, dynamic> json) {
     final cardName = (json['cardName'] ?? '').toString();
@@ -52,6 +54,13 @@ class Customer {
       clientName: clientName,
       wbnNo: wbnNo.isNotEmpty ? wbnNo : contact,
       cashSalesNo: (json['cashSalesNo'] ?? '').toString(),
+      waiter: (json['BranchEmpName'] ??
+              json['branchEmpName'] ??
+              json['waiter'] ??
+              json['Waiter'] ??
+              json['u_Waiter'] ??
+              '')
+          .toString(),
     );
   }
 
@@ -69,6 +78,7 @@ class Customer {
       clientName: clientName,
       wbnNo: wbnNo,
       cashSalesNo: cashSalesNo,
+      waiter: waiter,
     );
   }
 }
