@@ -37,6 +37,7 @@ class ReceiptData {
     this.camp = '',
     this.paymentMode = '',
     this.paidAmount,
+    this.qrImageBase64 = '',
     this.footer = 'Customer Sign:',
     this.printedAt,
   });
@@ -66,6 +67,8 @@ class ReceiptData {
   final String camp;
   final String paymentMode;
   final double? paidAmount;
+  /// SAP UDF QR image (`data:image/...;base64,...` or raw base64).
+  final String qrImageBase64;
   final String footer;
   final DateTime? printedAt;
 

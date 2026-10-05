@@ -6,7 +6,7 @@
 ;   "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\mpos.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.4.0"
+  #define MyAppVersion "1.6.5"
 #endif
 
 #define MyAppName "MPOS"

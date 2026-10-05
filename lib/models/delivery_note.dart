@@ -64,6 +64,7 @@ class DeliveryNote {
     this.agent = '',
     this.wbNo = '',
     this.waiter = '',
+    this.docType = 'Delivery',
   });
 
   final String docNum;
@@ -84,6 +85,10 @@ class DeliveryNote {
   final String agent;
   final String wbNo;
   final String waiter;
+  /// `Delivery` or `Invoice`. Sales list rows are open deliveries.
+  final String docType;
+
+  bool get isDelivery => docType.trim().toLowerCase() != 'invoice';
 
   factory DeliveryNote.fromJson(Map<String, dynamic> json) {
     final itemsRaw = json['deliveryNoteItemDetails'];
@@ -128,6 +133,7 @@ class DeliveryNote {
               json['Waiter'] ??
               '')
           .toString(),
+      docType: (json['docType'] ?? json['DocType'] ?? 'Delivery').toString(),
     );
   }
 

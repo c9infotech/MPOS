@@ -9,6 +9,7 @@ import '../../models/payment_mode.dart';
 import '../../models/pos_draft.dart';
 import '../../models/product.dart';
 import '../../models/branch_option.dart';
+import '../../models/invoice_receipt.dart';
 
 class PosRepository {
   PosRepository(this._api, this._auth);
@@ -366,6 +367,64 @@ class PosRepository {
     return notes
         .where((n) => n.wbNo.toLowerCase().contains(needle))
         .toList(growable: false);
+  }
+
+  /// A/R invoices by WBno, limited to the logged-in user's bar customers.
+  /// Same filter as [fetchCustomers]: cash cards mapped in USERWHSMAP.
+  Future<List<InvoiceReceipt>> fetchInvoiceReceipts({
+    required String wbNo,
+  }) async {
+    final wb = wbNo.trim();
+    if (wb.isEmpty) {
+      throw ApiException('WBno is required');
+    }
+    final userCode = _session.userCode.trim();
+    if (userCode.isEmpty) {
+      throw ApiException('User code missing. Please login again.');
+    }
+
+    final results = await Future.wait([
+      _api.post('InvoiceReceiptDetails', {
+        'WBno': wb,
+        'UserCode': userCode,
+      }),
+      fetchCustomers(),
+    ]);
+    final data = results[0] as Map<String, dynamic>;
+    final bars = results[1] as List<Customer>;
+    if (bars.isEmpty) {
+      throw ApiException('No bar customer is assigned to this user.');
+    }
+
+    final list = data['responseData'];
+    if (list is! List) return [];
+    final invoices = <InvoiceReceipt>[];
+    for (final row in list) {
+      final map = _asMap(row);
+      if (map == null) continue;
+      final invoice = InvoiceReceipt.fromJson(map);
+      if (_invoiceBelongsToBars(invoice, bars)) {
+        invoices.add(invoice);
+      }
+    }
+    return invoices;
+  }
+
+  /// Cash-bar name "cash sales Lion's Paw" matches invoice series "LionsPaw".
+  /// Also keeps invoices billed directly to that bar card.
+  bool _invoiceBelongsToBars(InvoiceReceipt invoice, List<Customer> bars) {
+    final series = _barKey(invoice.seriesName);
+    final card = invoice.cardCode.trim();
+    for (final bar in bars) {
+      if (card.isNotEmpty && card == bar.cardCode.trim()) return true;
+      final name = _barKey(bar.cardName);
+      if (series.length >= 4 && name.contains(series)) return true;
+    }
+    return false;
+  }
+
+  String _barKey(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
   Future<List<PaymentMode>> fetchPaymentModes({

@@ -1,4 +1,8 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
+import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
 
 import 'receipt_data.dart';
@@ -74,9 +78,12 @@ class ReceiptBuilder {
         ),
       );
     }
+    final docTitle = receipt.title.trim().isEmpty
+        ? 'Sales Invoice'
+        : receipt.title.trim();
     bytes.addAll(
       generator.text(
-        'Sales Invoice',
+        _safe(docTitle),
         styles: const PosStyles(align: PosAlign.center, bold: true),
       ),
     );
@@ -116,10 +123,14 @@ class ReceiptBuilder {
     bytes.addAll(generator.hr());
 
     for (final line in receipt.lines) {
-      final name = line.name.isNotEmpty ? line.name : line.code;
+      final desc = line.name.trim();
+      final code = line.code.trim();
+      final title = desc.isEmpty
+          ? code
+          : (code.isEmpty || desc == code ? desc : '$code  $desc');
       bytes.addAll(
         generator.text(
-          _clip(name, maxChars),
+          _clip(title, maxChars),
           styles: const PosStyles(bold: true),
         ),
       );
@@ -272,12 +283,73 @@ class ReceiptBuilder {
       // Blank space for customer handwritten signature.
       bytes.addAll(generator.feed(5));
       bytes.addAll(generator.text('______________________________'));
-      bytes.addAll(generator.feed(2));
+      bytes.addAll(generator.feed(1));
     } else {
-      bytes.addAll(generator.feed(2));
+      bytes.addAll(generator.feed(1));
     }
+
+    // Fiscal QR (SAP UDF "QR Value") at the bottom of the slip.
+    final qrImage = _qrImageForPrint(receipt.qrImageBase64, paper);
+    if (qrImage != null) {
+      bytes.addAll(generator.feed(1));
+      bytes.addAll(
+        generator.imageRaster(
+          qrImage,
+          align: PosAlign.center,
+        ),
+      );
+      bytes.addAll(generator.feed(1));
+    }
+
+    bytes.addAll(generator.feed(2));
     bytes.addAll(generator.cut());
     return bytes;
+  }
+
+  /// SAP "QR Value" is `data:image/jpg;base64,...`. Decode, then size it so
+  /// ESC/POS raster width is a multiple of 8 (otherwise the printer library
+  /// throws and the QR is dropped).
+  static img.Image? _qrImageForPrint(String raw, PaperSize paper) {
+    final bytes = _decodeQrImage(raw);
+    if (bytes == null) return null;
+    try {
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) return null;
+      // 58mm printers are ~384 dots wide; stay inside that.
+      var targetWidth = paper == PaperSize.mm80
+          ? 280
+          : paper == PaperSize.mm72
+              ? 240
+              : 200;
+      targetWidth -= targetWidth % 8;
+      final resized = img.copyResize(
+        decoded,
+        width: targetWidth,
+        interpolation: img.Interpolation.nearest,
+      );
+      // Keep QR modules solid black/white after the JPEG is resized.
+      return img.luminanceThreshold(resized, threshold: 0.55);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Accepts `data:image/...;base64,...` or raw base64 from SAP QR Value.
+  static Uint8List? _decodeQrImage(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return null;
+    var b64 = value;
+    final comma = value.indexOf(',');
+    if (value.toLowerCase().startsWith('data:') && comma > 0) {
+      b64 = value.substring(comma + 1);
+    }
+    b64 = b64.replaceAll(RegExp(r'\s'), '');
+    if (b64.isEmpty) return null;
+    try {
+      return base64Decode(b64);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Printers use Latin-1; strip/replace characters that would crash encoding.

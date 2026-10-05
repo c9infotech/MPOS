@@ -6,6 +6,7 @@ import '../../core/theme/app_colors.dart';
 import '../login/login_screen.dart';
 import '../pos/pos_screen.dart';
 import '../printer/printer_settings_screen.dart';
+import '../receipt/receipt_search_screen.dart';
 import '../sales/sales_list_screen.dart';
 import '../draft/draft_list_screen.dart';
 
@@ -76,6 +77,17 @@ class _MainShellState extends State<MainShell> {
                 );
               },
             ),
+          IconButton(
+            tooltip: 'Receipt',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const ReceiptSearchScreen(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.receipt_outlined),
+          ),
           IconButton(
             tooltip: 'Bluetooth printer',
             onPressed: () {
