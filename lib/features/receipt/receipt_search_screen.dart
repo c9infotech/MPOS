@@ -89,6 +89,28 @@ class _ReceiptSearchScreenState extends State<ReceiptSearchScreen> {
     }
   }
 
+  Future<void> _printAll() async {
+    if (_printingKey != null) return;
+    if (_invoices.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Search a WBno first'),
+          backgroundColor: AppColors.warning,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _printingKey = 'all');
+    try {
+      final receipt = ReceiptFactory.fromInvoiceReceipts(_invoices);
+      if (!mounted) return;
+      await printReceipt(context, receipt, includeCustomerSign: true);
+    } finally {
+      if (mounted) setState(() => _printingKey = null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -166,6 +188,31 @@ class _ReceiptSearchScreenState extends State<ReceiptSearchScreen> {
                           ),
                         )
                       : const Text('Search'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: (_loading ||
+                          _invoices.isEmpty ||
+                          _printingKey != null)
+                      ? null
+                      : _printAll,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.appBar,
+                    foregroundColor: AppColors.textOnPrimary,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    minimumSize: const Size(0, 44),
+                  ),
+                  icon: _printingKey == 'all'
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.print, size: 18),
+                  label: const Text('Print All'),
                 ),
               ],
             ),

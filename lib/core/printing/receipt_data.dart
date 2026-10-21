@@ -5,6 +5,7 @@ class ReceiptLine {
     required this.qty,
     required this.price,
     this.uom = '',
+    this.isHeading = false,
   });
 
   final String code;
@@ -12,6 +13,9 @@ class ReceiptLine {
   final double qty;
   final double price;
   final String uom;
+
+  /// Document label printed without quantity or price.
+  final bool isHeading;
 
   double get lineTotal => qty * price;
 }
@@ -38,6 +42,7 @@ class ReceiptData {
     this.paymentMode = '',
     this.paidAmount,
     this.qrImageBase64 = '',
+    this.qrImages = const [],
     this.footer = 'Customer Sign:',
     this.printedAt,
   });
@@ -69,6 +74,9 @@ class ReceiptData {
   final double? paidAmount;
   /// SAP UDF QR image (`data:image/...;base64,...` or raw base64).
   final String qrImageBase64;
+
+  /// Extra fiscal QR images printed once, after the shared footer.
+  final List<String> qrImages;
   final String footer;
   final DateTime? printedAt;
 

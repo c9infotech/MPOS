@@ -110,6 +110,125 @@ abstract final class ReceiptFactory {
     );
   }
 
+  /// One bill for every invoice and delivery on a WBno.
+  /// Company header, guest details, totals, and customer-sign footer print once.
+  static ReceiptData fromInvoiceReceipts(List<InvoiceReceipt> invoices) {
+    if (invoices.isEmpty) {
+      throw ArgumentError('No receipts to print');
+    }
+
+    String firstNonEmpty(String Function(InvoiceReceipt n) pick) {
+      for (final n in invoices) {
+        final v = pick(n).trim();
+        if (v.isNotEmpty) return v;
+      }
+      return '';
+    }
+
+    final currencyRaw = firstNonEmpty((n) => n.docCurrency);
+    final currency = currencyRaw.isEmpty ? 'USD' : currencyRaw;
+
+    final lines = <ReceiptLine>[];
+    for (final invoice in invoices) {
+      final docNo = invoice.displayDocNo.trim();
+      final docLabel = docNo.isEmpty
+          ? invoice.displayDocType
+          : '${invoice.displayDocType} $docNo';
+      final guest = invoice.bookingName.trim().isNotEmpty
+          ? invoice.bookingName.trim()
+          : invoice.cardName.trim();
+      final heading = guest.isEmpty ? docLabel : '$docLabel · $guest';
+      if (invoices.length > 1) {
+        lines.add(
+          ReceiptLine(
+            code: '',
+            name: heading,
+            qty: 0,
+            price: 0,
+            isHeading: true,
+          ),
+        );
+      }
+      for (final item in invoice.items) {
+        lines.add(
+          ReceiptLine(
+            code: item.itemCode,
+            name: item.description,
+            qty: item.quantity,
+            price: item.price,
+          ),
+        );
+      }
+    }
+
+    bool matchesCurrency(InvoiceReceipt invoice) {
+      final value = invoice.docCurrency.trim();
+      return value.isEmpty || value == currency;
+    }
+
+    final matching = invoices.where(matchesCurrency).toList(growable: false);
+    final subtotal = matching.fold<double>(0, (s, n) => s + n.subtotal);
+    final tax = matching.fold<double>(0, (s, n) => s + n.vatSum);
+    final total = matching.fold<double>(0, (s, n) => s + n.docTotal);
+
+    final otherCurrencies = <String, double>{};
+    for (final invoice in invoices) {
+      if (matchesCurrency(invoice)) continue;
+      final code = invoice.docCurrency.trim();
+      otherCurrencies[code] = (otherCurrencies[code] ?? 0) + invoice.docTotal;
+    }
+    for (final entry in otherCurrencies.entries) {
+      lines.add(
+        ReceiptLine(
+          code: '',
+          name: '${entry.key} total ${entry.value.toStringAsFixed(2)}',
+          qty: 0,
+          price: 0,
+          isHeading: true,
+        ),
+      );
+    }
+
+    final orderNumbers = invoices
+        .map((n) => n.displayDocNo.trim())
+        .where((d) => d.isNotEmpty)
+        .toList(growable: false);
+
+    final qrImages = <String>[];
+    for (final invoice in invoices) {
+      final qr = invoice.qrValue.trim();
+      if (qr.isNotEmpty && !qrImages.contains(qr)) qrImages.add(qr);
+    }
+
+    final deliveries = invoices.where((n) => n.isDelivery).length;
+    final title = deliveries == invoices.length ? 'Bar Order' : 'Sales Invoice';
+    final single = invoices.length == 1;
+
+    return ReceiptData(
+      title: title,
+      currency: currency,
+      docNo: single ? invoices.first.displayDocNo : '',
+      orderNumbers: single ? const [] : orderNumbers,
+      customerName: firstNonEmpty(
+        (n) => n.bookingName.isNotEmpty ? n.bookingName : n.cardName,
+      ),
+      clientName: firstNonEmpty((n) => n.bookingName),
+      agent: firstNonEmpty((n) => n.agent),
+      wbNo: firstNonEmpty((n) => n.displayWbNo),
+      waiter: firstNonEmpty((n) => n.waiter),
+      room: firstNonEmpty((n) => n.rooming),
+      tin: firstNonEmpty((n) => n.tinNo),
+      bookingReference: firstNonEmpty((n) => n.displayWbNo),
+      camp: ReceiptData.campFromCardName(firstNonEmpty((n) => n.cardName)),
+      subtotal: subtotal,
+      tax: tax,
+      total: total,
+      qrImageBase64: qrImages.isEmpty ? '' : qrImages.first,
+      qrImages: qrImages.length <= 1 ? const [] : qrImages.sublist(1),
+      lines: lines,
+    );
+  }
+
   static ReceiptData fromInvoiceReceipt(InvoiceReceipt invoice) {
     final currency =
         invoice.docCurrency.trim().isEmpty ? 'USD' : invoice.docCurrency.trim();

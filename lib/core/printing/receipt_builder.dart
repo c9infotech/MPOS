@@ -123,6 +123,18 @@ class ReceiptBuilder {
     bytes.addAll(generator.hr());
 
     for (final line in receipt.lines) {
+      if (line.isHeading) {
+        final heading = line.name.trim();
+        if (heading.isEmpty) continue;
+        bytes.addAll(generator.feed(1));
+        bytes.addAll(
+          generator.text(
+            _clip(heading, maxChars),
+            styles: const PosStyles(bold: true),
+          ),
+        );
+        continue;
+      }
       final desc = line.name.trim();
       final code = line.code.trim();
       final title = desc.isEmpty
@@ -289,8 +301,16 @@ class ReceiptBuilder {
     }
 
     // Fiscal QR (SAP UDF "QR Value") at the bottom of the slip.
-    final qrImage = _qrImageForPrint(receipt.qrImageBase64, paper);
-    if (qrImage != null) {
+    final qrSources = <String>[
+      receipt.qrImageBase64,
+      ...receipt.qrImages,
+    ];
+    final seenQr = <String>{};
+    for (final source in qrSources) {
+      final value = source.trim();
+      if (value.isEmpty || !seenQr.add(value)) continue;
+      final qrImage = _qrImageForPrint(value, paper);
+      if (qrImage == null) continue;
       bytes.addAll(generator.feed(1));
       bytes.addAll(
         generator.imageRaster(
